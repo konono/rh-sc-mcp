@@ -1,0 +1,11 @@
+bin/
+dist/
+
+# Local panecom pane/session state, not part of the project.
+.panecom/
+
+# Real configuration holds an offline token. Only the example is tracked.
+config.yaml
+config.local.yaml
+*.local.yaml
+.env
