@@ -235,6 +235,22 @@ func (c *Client) UnversionedPath(segments ...string) string {
 	return "/" + strings.Join(parts, "/")
 }
 
+// VerifyCredentials performs the SSO exchange and reports whether it
+// produced a usable access token.
+//
+// It exists so an operator can answer "is my offline token working?"
+// without starting a session and guessing from a tool failure, and
+// without the answer depending on whether any particular case is
+// readable. It returns no token to its caller: the question is whether
+// the exchange succeeds, and handing the credential back would only
+// create another place for it to be printed.
+func (c *Client) VerifyCredentials(ctx context.Context) error {
+	if _, err := c.tokens.Token(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Get performs an authenticated GET.
 func (c *Client) Get(ctx context.Context, path string, q url.Values) (*Response, error) {
 	return c.do(ctx, http.MethodGet, path, q, nil)

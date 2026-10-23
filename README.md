@@ -153,6 +153,43 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 
 この出力に認証情報は一切含まれません (fingerprint も出しません)。バグ報告にそのまま貼れます。
 
+### 疎通確認 (`--check-auth`)
+
+offline token が通るかどうかは、セッションを開始せずに確認できます。
+
+```bash
+./bin/rh-sc-mcp --config config.yaml --check-auth
+```
+
+```json
+{
+  "ssoTokenURL": "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token",
+  "ssoClientID": "rhsm-api",
+  "endpoint": "https://api.access.redhat.com/support/v3",
+  "tokenExchange": "ok",
+  "apiProbe": "ok",
+  "casesVisible": 12
+}
+```
+
+2 段階を**別々に報告します**。原因も対処も違うためです。
+
+- `tokenExchange` — SSO が offline token を受理したか。失敗した場合、SSO は原因を区別せず `invalid_grant` を返すため、値そのものを確認する必要があります。
+- `apiProbe` — 発行された access token を API が受理したか。SSO は通るのに API が `403` を返すのは、アカウントの可視範囲の問題。
+
+API 側のプローブは `maxResults: 1` の検索 1 回だけです (token が通ることの確認が目的なので、データを引いてくる必要はありません)。`case` が `none` の構成では省略され、その旨が `apiProbe` に入ります。
+
+失敗時は exit code 1 を返すのでヘルスチェックにも使えます。**出力に認証情報は含まれません** (上流がリクエストヘッダを反射してきた場合も洗浄されます)。
+
+token をファイルに置いている場合は、値をコマンドラインに出さず、末尾改行を落として渡してください。
+
+```bash
+chmod 600 token   # 置くなら最低限これ。token / *.token は .gitignore 済み
+RH_SC_OFFLINE_TOKEN="$(tr -d '\r\n' < token)" ./bin/rh-sc-mcp --check-auth
+```
+
+末尾改行の除去は必須です。改行が付いたままだと別の文字列を送ることになり、SSO は受理しません。そのときのエラーは原因を区別しないので、token 自体の問題との切り分けができなくなります。
+
 ---
 
 ## MCP クライアントからの接続
@@ -356,9 +393,28 @@ security: Bearer (apiKey, in: header, name: Authorization)
 
 仕様書には `/v1/cases` 系のパスも存在し、設定で切り替えられるようにしてありますが、本実装が想定・テストしているのは `v3` です。`v1` を指定すると起動時に警告が出ます。
 
-### 5. 実 API に対する動作確認は行っていない
+### 5. 実 API に対する動作確認は「認証前まで」しか済んでいない
 
-テストはすべて `httptest` のスタブに対するものです。認証フロー、2xx の揺れ、エラー処理、権限制御、MCP のハンドシェイクからツール呼び出しまでを検証していますが、**実際の Red Hat API を相手にした検証は含みません**。スタブは公開仕様から起こしたものなので、仕様と実装が食い違っている箇所があれば検出できません。
+自動テストはすべて `httptest` のスタブに対するものです。スタブは公開仕様から起こしたものなので、**仕様と実 API が食い違っている箇所は検出できません**。
+
+実エンドポイントに対しては、2026-10-24 時点で以下まで確認済みです。
+
+| 確認したこと | 結果 |
+|---|---|
+| `sso.redhat.com` のトークンエンドポイントの到達性 | GET に `405` が返った (ホストに到達し、応答があった) |
+| `api.access.redhat.com` の到達性 | `/support/v3/cases/{n}` への認証なしリクエストに `401` が返った (ホストに到達し、認証ゲートが応答した) |
+| SSO のエラー応答の形 | `{"error":"invalid_grant","error_description":"..."}` + `400`。本実装の `ssoError` と一致 |
+| `--check-auth` の失敗経路 | 無効な値を渡したとき `tokenExchange: failed` / `apiProbe: skipped` / exit 1、認証情報の露出なし |
+
+**この `401` はパスの妥当性を示しません。** 認証ゲートがルーティングより前に応答している可能性があるため、確認できたのは「ホストに到達し、認証されていないリクエストが拒否された」ことまでです。`/support` + `/v3/...` というパス構成の根拠は実測ではなく公開仕様書 (`CaseManagement-API_v1.json`) です。
+
+**未確認のまま残っているのは、有効な offline token を使ったときの認証済み経路です。** 具体的には、`access_token` の発行と `expires_in`、API がその token を受理すること、v3 パスが実際にルーティングされること、`POST /v3/cases/filter` の実レスポンス形状、ケースの取得・作成・更新・コメントの各応答。これらは有効な token が用意でき次第 `--check-auth` と各ツールで確認する必要があります。
+
+#### `invalid_grant` が返るとき
+
+開発中に 41 バイトのファイル (40 文字 + 改行) に入った値を渡したところ、SSO は `400 invalid_grant: Invalid refresh token` を返しました。**実測として言えるのはこれだけです** — この応答から、その値がどういう形式だったか、失効していたのか取り消されていたのか、そもそも offline token だったのかは区別できません。SSO はいずれの場合も同じ `invalid_grant` を返します。
+
+`--check-auth` が `invalid_grant` を返す場合は、[Red Hat 公式の API Tokens ページ](https://access.redhat.com/management/api) で発行した offline token に差し替えたうえで、末尾改行が混入していないかを確認してください。
 
 ### 6. severity / status / product の値は検証しない
 
@@ -428,6 +484,7 @@ make test        # go test -race ./...
 - 上流エラーがモデルに届き、かつ Bearer トークンが混ざらないこと
 - **実際の経路 (SSO 交換 → クライアント → MCP 往復) で、`200` + HTML を返す上流に対し `rhcase_get` / `rhcase_create` / `rhcase_add_comment` がツールエラーになり、access token も offline token もモデル出力に現れないこと**
 - 生成された入力スキーマに必須項目が立っていること、write ツールが `readOnlyHint` を名乗らないこと
+- `--check-auth` が SSO 失敗と API 失敗を区別すること、`case: none` でプローブを省略すること、プローブが 1 件しか要求しないこと、出力に認証情報が現れないこと
 
 ```
 ok  github.com/konono/rh-sc-mcp/internal/config

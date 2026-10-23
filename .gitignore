@@ -9,3 +9,9 @@ config.yaml
 config.local.yaml
 *.local.yaml
 .env
+
+# A credential kept on disk for local --check-auth runs. Never commit it,
+# and prefer chmod 600: anything here is a live Red Hat offline token.
+token
+token.*
+*.token

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/konono/rh-sc-mcp/internal/config"
 	"github.com/konono/rh-sc-mcp/internal/server"
@@ -21,6 +22,7 @@ func main() {
 	var (
 		cfgPath     = flag.String("config", os.Getenv("RH_SC_MCP_CONFIG"), "path to the configuration YAML (also $RH_SC_MCP_CONFIG)")
 		printScope  = flag.Bool("print-scope", false, "print the resolved scope and the tools it exposes, then exit")
+		checkAuth   = flag.Bool("check-auth", false, "exchange the offline token and probe the API, then exit; prints no credential")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -45,6 +47,24 @@ func main() {
 
 	if *printScope {
 		printResolvedScope(cfg, srv)
+		return
+	}
+
+	if *checkAuth {
+		ctx, cancel := context.WithTimeout(context.Background(),
+			time.Duration(cfg.TimeoutSeconds)*2*time.Second)
+		defer cancel()
+		res := srv.CheckAuth(ctx)
+		b, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(string(b))
+		// A non-zero exit so this is usable as a health check in a
+		// script, not only read by a person.
+		if !res.OK() {
+			os.Exit(1)
+		}
 		return
 	}
 

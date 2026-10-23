@@ -896,6 +896,116 @@ func TestMissingCaseIsReportedAsSuch(t *testing.T) {
 	}
 }
 
+// ---- --check-auth ---------------------------------------------------------
+
+func TestCheckAuthSucceedsAgainstAWorkingEndpoint(t *testing.T) {
+	api := newStubAPI(t)
+	got := testServer(t, api, nil).CheckAuth(context.Background())
+
+	if !got.OK() {
+		t.Fatalf("check failed: %+v", got)
+	}
+	if got.TokenAcquire != "ok" || got.APIProbe != "ok" {
+		t.Fatalf("tokenExchange=%q apiProbe=%q", got.TokenAcquire, got.APIProbe)
+	}
+	if got.CasesVisible == nil || *got.CasesVisible != 3 {
+		t.Errorf("casesVisible = %v, want the stub's totalCount of 3", got.CasesVisible)
+	}
+	// The probe must stay small; it exists to prove the token works,
+	// not to fetch anything.
+	if !strings.Contains(api.bodies["POST /v3/cases/filter"], `"maxResults":1`) {
+		t.Errorf("the probe asked for more than one case: %s", api.bodies["POST /v3/cases/filter"])
+	}
+}
+
+// SSO and API failures have different causes and different fixes, so
+// they must not collapse into one "auth failed".
+func TestCheckAuthDistinguishesSSOFromAPIFailure(t *testing.T) {
+	t.Run("SSO rejects the offline token", func(t *testing.T) {
+		api := newStubAPI(t)
+		srv := testServer(t, api, nil)
+		dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Invalid refresh token"}`))
+		}))
+		defer dead.Close()
+		srv.api = redhat.NewClient(api.URL, "v3", dead.URL, "rhsm-api", liveOfflineToken, 5*time.Second)
+
+		got := srv.CheckAuth(context.Background())
+		if got.OK() {
+			t.Fatal("a rejected offline token was reported as working")
+		}
+		if got.TokenAcquire != "failed" {
+			t.Errorf("tokenExchange = %q", got.TokenAcquire)
+		}
+		if got.APIProbe != "skipped" {
+			t.Errorf("the API was probed after the exchange failed: %q", got.APIProbe)
+		}
+		if !strings.Contains(got.Error, "invalid_grant") {
+			t.Errorf("the cause is not visible: %q", got.Error)
+		}
+		assertNoCredentials(t, got.Error)
+	})
+
+	t.Run("API rejects the issued token", func(t *testing.T) {
+		forbidding := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Account mismatch."}`))
+		}))
+		defer forbidding.Close()
+
+		got := serverAgainst(t, forbidding.URL, nil).CheckAuth(context.Background())
+		if got.OK() {
+			t.Fatal("a forbidden account was reported as working")
+		}
+		if got.TokenAcquire != "ok" {
+			t.Errorf("the exchange should have succeeded: %q", got.TokenAcquire)
+		}
+		if got.APIProbe != "failed" {
+			t.Errorf("apiProbe = %q", got.APIProbe)
+		}
+		if !strings.Contains(got.Error, "Account mismatch.") {
+			t.Errorf("the cause is not visible: %q", got.Error)
+		}
+	})
+}
+
+// The whole point of this output is that it can be pasted into a bug
+// report, so nothing credential-shaped may appear anywhere in it.
+func TestCheckAuthOutputCarriesNoCredential(t *testing.T) {
+	// A failing upstream that reflects the Authorization header is the
+	// worst case for this.
+	got := serverAgainst(t, reflectingAPI(t).URL, nil).CheckAuth(context.Background())
+
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCredentials(t, string(b))
+}
+
+func TestCheckAuthSkipsTheProbeWhenCasesAreUnreadable(t *testing.T) {
+	api := newStubAPI(t)
+	got := testServer(t, api, func(c *config.Config) {
+		c.Resources = map[config.Resource]config.ResourceRule{config.ResCase: {Permission: config.LevelNone}}
+	}).CheckAuth(context.Background())
+
+	if !got.OK() {
+		t.Fatalf("check failed: %+v", got)
+	}
+	if got.TokenAcquire != "ok" {
+		t.Errorf("tokenExchange = %q", got.TokenAcquire)
+	}
+	if !strings.HasPrefix(got.APIProbe, "skipped") {
+		t.Errorf("apiProbe = %q, want a skip with a reason", got.APIProbe)
+	}
+	if api.sawPath("/v3/cases/filter") {
+		t.Error("the probe ran even though cases are not readable")
+	}
+}
+
 // ---- KCS ------------------------------------------------------------------
 
 func TestKCSSearchPassesTheResponseThrough(t *testing.T) {

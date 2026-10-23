@@ -76,6 +76,65 @@ func (s *Server) Run(ctx context.Context) error {
 // transport to it.
 func (s *Server) MCP() *mcp.Server { return s.mcp }
 
+// AuthCheck is the result of --check-auth.
+//
+// It deliberately holds no credential, not even a fingerprint: the usual
+// destination for this output is a bug report or a terminal someone is
+// screen-sharing.
+type AuthCheck struct {
+	SSOTokenURL  string `json:"ssoTokenURL"`
+	SSOClientID  string `json:"ssoClientID"`
+	Endpoint     string `json:"endpoint"`
+	TokenAcquire string `json:"tokenExchange"`
+	APIProbe     string `json:"apiProbe"`
+	CasesVisible *int   `json:"casesVisible,omitempty"`
+	// Error is the scrubbed failure, when there was one.
+	Error string `json:"error,omitempty"`
+}
+
+// OK reports whether every step that ran succeeded.
+func (a *AuthCheck) OK() bool { return a.Error == "" }
+
+// CheckAuth exchanges the offline token and, when cases are readable,
+// makes the smallest possible API call to confirm the token is accepted
+// by the API and not merely issued by SSO.
+//
+// The two steps are reported separately because they fail for different
+// reasons and have different fixes: SSO rejects a revoked or mistyped
+// offline token, while the API rejects a token whose account cannot see
+// what was asked for.
+func (s *Server) CheckAuth(ctx context.Context) *AuthCheck {
+	out := &AuthCheck{
+		SSOTokenURL: s.cfg.SSOTokenURL,
+		SSOClientID: s.cfg.SSOClientID,
+		Endpoint:    s.cfg.APIRoot(),
+		APIProbe:    "skipped",
+	}
+	if err := s.api.VerifyCredentials(ctx); err != nil {
+		out.TokenAcquire = "failed"
+		out.Error = err.Error()
+		return out
+	}
+	out.TokenAcquire = "ok"
+
+	if !s.cfg.Allows(config.ResCase, config.LevelRead) {
+		out.APIProbe = "skipped: cases are not readable in this configuration"
+		return out
+	}
+	// One case, so the probe costs the API as little as possible and
+	// cannot drag a page of data into a terminal.
+	res, err := s.api.FilterCases(ctx, &redhat.FilterCasesRequest{MaxResults: 1})
+	if err != nil {
+		out.APIProbe = "failed"
+		out.Error = err.Error()
+		return out
+	}
+	out.APIProbe = "ok"
+	count := res.TotalCount
+	out.CasesVisible = &count
+	return out
+}
+
 func (s *Server) instructions() string {
 	var b strings.Builder
 	b.WriteString("Red Hat Support Case Management, scoped by the operator's configuration.\n")
