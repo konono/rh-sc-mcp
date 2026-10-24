@@ -906,7 +906,7 @@ main への push
 
 現在のバージョンは 2 箇所にあります — `.release-please-manifest.json` と `internal/version/version.go` です。前者が release-please にとっての記録で、後者は `release-please-config.json` の `extra-files` に登録された派生先です。リリースのたびに release-please が**両方をまとめて更新**するので、手で書き換える必要はありません。
 
-`version.go` 側の目印は定数を囲む `x-release-please-start-version` / `x-release-please-end` のコメントです。release-please はこの範囲を探して置換するため、**マーカーを消したり定数から引き離したりすると置換対象を見失います**。そうなったときに何が起きるか (エラーで止まるのか、`version.go` だけ古いまま進むのか) は確認していないので、**マーカーは動かさない**のが無難です。
+`version.go` 側の目印は定数を囲む `x-release-please-start-version` / `x-release-please-end` のコメントです。release-please はこの範囲を探して置換します (このマーカー付きで実際に `0.1.0` → `0.2.0` へ書き換わることを確認済み)。**マーカーを消したり定数から引き離したりすると置換対象を見失います**。そうなったときに何が起きるか (エラーで止まるのか、`version.go` だけ古いまま進むのか) は確認していないので、**マーカーは動かさない**のが無難です。
 
 コミットメッセージは [Conventional Commits](https://www.conventionalcommits.org/) が必須です。release-please はこれを読んでバージョンの上げ幅とリリースノートを決めるため、形式から外れたコミットは**変更履歴から黙って消えます**。PR では `commitlint` が検査します。
 
@@ -941,7 +941,11 @@ gh api repos/<owner>/<repo>/actions/permissions/workflow
 
 なお後続の GoReleaser ジョブはこの影響を受けません。タグ push を契機に新しいワークフローが起動するのではなく、同一ワークフロー実行内で `needs` によって繋がっているためです。
 
-**未確認**: この承認フローは上記 GitHub ドキュメントの記載に基づくもので、本リポジトリで実際のリリース PR を作って確かめてはいません (2026-10-25 時点で Release ワークフローの実行は token 未設定による失敗 1 回のみ)。
+**実測** (2026-10-25、このリポジトリでの 1 回目): `main` への push で Release ワークフローが成功し、release-please が PR #1 を作成しました。その PR の CI と Commitlint は `action_required` の状態で作られ、承認するまで開始されませんでした (run の `created_at` と `run_started_at` に 22 秒の差があります)。承認後は commitlint・lint・Go 1.25/1.26 の test がすべて pass しています。
+
+同時に、バージョンが 2 箇所で揃って更新されることも確認できました。PR #1 の差分は `CHANGELOG.md` / `.release-please-manifest.json` / `internal/version/version.go` の 3 ファイルだけで、後者 2 つがどちらも `0.1.0` から `0.2.0` へ書き換わっています。
+
+その `0.2.0` という値は、**この時点の観測であって初回リリースの一般則ではありません**。release-please は manifest の値を「現在のバージョン」として読み、そこから後のコミットを見て次を決めます。このときは `0.1.0` に `feat` 5 件が乗っていたので minor が上がりました。別のリポジトリ、別のコミット列なら別の値になります。
 
 ### 配布物
 
