@@ -2,10 +2,13 @@ package redhat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // caseNumberRe is the accepted shape of a case number.
@@ -308,24 +311,159 @@ func (c *Client) AddComment(ctx context.Context, caseNumber string, req *CreateC
 }
 
 // SearchKCS queries the knowledge-base search endpoint.
-//
-// The response is Solr's, which the document does not model ("200: Solr
-// Response"), so it is returned as decoded JSON instead of a struct that
-// would be guesswork.
-func (c *Client) SearchKCS(ctx context.Context, req *SolrSearchRequest) (any, error) {
+func (c *Client) SearchKCS(ctx context.Context, req *SolrSearchRequest) (*KCSResult, error) {
 	resp, err := c.PostJSON(ctx, c.UnversionedPath("search", "v2", "kcs"), req)
 	if err != nil {
 		return nil, err
 	}
-	var out any
-	ok, err := resp.DecodeJSON(&out)
+	var raw json.RawMessage
+	ok, err := resp.DecodeJSON(&raw)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return map[string]any{}, nil
+		return &KCSResult{Documents: []KCSDocument{}}, nil
 	}
-	return out, nil
+	return parseKCSResponse(raw), nil
+}
+
+// solrEnvelope is the shape observed from the live endpoint:
+// {responseHeader, response: {docs, numFound, start, numFoundExact}, spellcheck}.
+//
+// Docs stay as raw objects because the field set is Solr's, varies with
+// the caller's `expression`, and is not described anywhere this code can
+// rely on. Projecting from a map keeps a missing field a missing field
+// rather than a decode failure.
+type solrEnvelope struct {
+	Response *struct {
+		Docs          []map[string]json.RawMessage `json:"docs"`
+		NumFound      int                          `json:"numFound"`
+		Start         int                          `json:"start"`
+		NumFoundExact *bool                        `json:"numFoundExact"`
+	} `json:"response"`
+}
+
+// parseKCSResponse projects a search payload, or reports that it could
+// not recognise one.
+//
+// It never returns an error: an unfamiliar shape is a documented
+// outcome here, not a failure, because the endpoint's response is
+// unspecified. The caller gets either documents or a description of
+// what arrived.
+func parseKCSResponse(raw json.RawMessage) *KCSResult {
+	unrecognized := func(note string) *KCSResult {
+		return &KCSResult{
+			Documents: []KCSDocument{},
+			Unrecognized: &UnrecognizedPayload{
+				TopLevelKeys: topLevelKeys(raw),
+				SizeBytes:    len(raw),
+				Note:         note,
+			},
+		}
+	}
+
+	var env solrEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return unrecognized("the response could not be read as the Solr envelope this server projects " +
+			"(expected an object with response.docs); no part of the body is included here")
+	}
+	if env.Response == nil || env.Response.Docs == nil {
+		return unrecognized("the response had no response.docs array to project; " +
+			"no part of the body is included here")
+	}
+
+	out := &KCSResult{
+		NumFound:      env.Response.NumFound,
+		NumFoundExact: env.Response.NumFoundExact,
+		Start:         env.Response.Start,
+		Documents:     make([]KCSDocument, 0, len(env.Response.Docs)),
+	}
+	for _, d := range env.Response.Docs {
+		out.Documents = append(out.Documents, projectKCSDoc(d))
+	}
+	return out
+}
+
+// topLevelKeys lists the keys of a JSON object, sorted, for the
+// unrecognized-shape report. It returns nil for anything that is not an
+// object, which is itself informative.
+func topLevelKeys(raw json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// projectKCSDoc narrows one Solr document.
+func projectKCSDoc(d map[string]json.RawMessage) KCSDocument {
+	doc := KCSDocument{
+		ID:               kcsString(d, "id"),
+		DocumentKind:     kcsString(d, "documentKind"),
+		Language:         kcsString(d, "language"),
+		LastModifiedDate: kcsString(d, "lastModifiedDate"),
+		ViewURI:          kcsString(d, "view_uri"),
+		// The live response carries publishedTitle, allTitle, title and
+		// sortTitle with the same text. One is enough; the order is
+		// most-canonical first.
+		Title: firstNonEmpty(
+			kcsString(d, "publishedTitle"),
+			kcsString(d, "allTitle"),
+			kcsString(d, "title"),
+		),
+	}
+	doc.Snippet, doc.SnippetTruncated = truncateRunes(kcsString(d, "abstract"), kcsSnippetRunes)
+	return doc
+}
+
+// kcsString reads a string field, tolerating a field that is absent or
+// of another type. Solr will return a list where a schema says single
+// value, and a search result is not worth failing over.
+func kcsString(d map[string]json.RawMessage, key string) string {
+	v, ok := d[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(v, &s); err == nil {
+		return s
+	}
+	var list []string
+	if err := json.Unmarshal(v, &list); err == nil && len(list) > 0 {
+		return list[0]
+	}
+	return ""
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// truncateRunes cuts s to at most n runes, reporting whether it cut.
+// Counting runes rather than bytes keeps a Japanese excerpt the same
+// length as an English one instead of a third of it.
+func truncateRunes(s string, n int) (string, bool) {
+	if utf8.RuneCountInString(s) <= n {
+		return s, false
+	}
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i], true
+		}
+		count++
+	}
+	return s, false
 }
 
 func setIf(v url.Values, key, val string) {

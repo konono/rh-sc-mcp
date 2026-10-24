@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -120,9 +121,51 @@ func newStubAPI(t *testing.T) *stubAPI {
 	mux.HandleFunc("/v3/cases/04337263/comments/c1", record(func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, map[string]any{"id": "c1", "commentBody": "first", "createdBy": "alice"})
 	}))
-	mux.HandleFunc("/search/v2/kcs", record(func(w http.ResponseWriter, _ *http.Request) {
+	// The envelope and field set observed from the live endpoint on
+	// 2026-10-25. The document models none of this ("200: Solr
+	// Response"), so the stub is written from the measurement.
+	mux.HandleFunc("/search/v2/kcs", record(func(w http.ResponseWriter, r *http.Request) {
+		// Sending `exp` returns 500 from the real service, even though
+		// the document lists it as required. Reproduced here so the
+		// field can never come back.
+		if strings.Contains(s.bodies[r.Method+" "+r.URL.Path], `"exp"`) {
+			reply(w, 500, map[string]any{
+				"message":       "Internal Server Error",
+				"detailMessage": "unexpected parameter",
+			})
+			return
+		}
 		reply(w, 200, map[string]any{
-			"response": map[string]any{"numFound": 1, "docs": []map[string]any{{"id": "7890"}}},
+			"responseHeader": map[string]any{"status": 0, "QTime": 12, "zkConnected": true},
+			"spellcheck":     map[string]any{},
+			"response": map[string]any{
+				"numFound":      37134,
+				"numFoundExact": true,
+				"start":         0,
+				"maxScore":      9.5,
+				"docs": []map[string]any{{
+					"id":               "7890",
+					"publishedTitle":   "Configuring SELinux booleans",
+					"allTitle":         "Configuring SELinux booleans",
+					"title":            "Configuring SELinux booleans",
+					"sortTitle":        "Configuring SELinux booleans",
+					"documentKind":     "Solution",
+					"language":         "en",
+					"lastModifiedDate": "2026-09-01T00:00:00Z",
+					"view_uri":         "https://access.redhat.com/solutions/7890",
+					"resource_uri":     "https://api.access.redhat.com/support/solutions/7890",
+					"uri":              "solutions/7890",
+					// Long enough to be cut, as the live abstract was.
+					"abstract": strings.Repeat("せつめい", 200),
+					// Internal fields the projection must drop.
+					"_version_":                        1234567890,
+					"granite_r2_vector_field_set":      true,
+					"miniLM_vector_field_set":          true,
+					"docs_text_store":                  strings.Repeat("x", 5000),
+					"large_text_store":                 strings.Repeat("y", 5000),
+					"vector_psfa_all-MiniLM-L6-v2_set": true,
+				}},
+			},
 		})
 	}))
 	mux.HandleFunc("/", record(func(w http.ResponseWriter, r *http.Request) {
@@ -1144,24 +1187,185 @@ func TestCheckAuthSkipsTheProbeWhenCasesAreUnreadable(t *testing.T) {
 
 // ---- KCS ------------------------------------------------------------------
 
-func TestKCSSearchPassesTheResponseThrough(t *testing.T) {
-	api := newStubAPI(t)
-	cs := connect(t, testServer(t, api, func(c *config.Config) {
+// kcsServer is a server with the KCS surface granted.
+func kcsServer(t *testing.T, api *stubAPI) *mcp.ClientSession {
+	t.Helper()
+	return connect(t, testServer(t, api, func(c *config.Config) {
 		c.Resources = map[config.Resource]config.ResourceRule{config.ResKCS: {Permission: config.LevelRead}}
 	}))
+}
+
+func TestKCSSearchProjectsDocuments(t *testing.T) {
+	api := newStubAPI(t)
+	cs := kcsServer(t, api)
 
 	var got kcsSearchResult
-	decodeResult(t, call(t, cs, "rhkcs_search", map[string]any{"query": "kernel panic", "rows": 5}), &got)
+	decodeResult(t, call(t, cs, "rhkcs_search", map[string]any{"query": "selinux", "rows": 5}), &got)
 
-	if got.Result == nil {
-		t.Fatal("no result")
-	}
 	// The search endpoint has no version segment.
 	if !api.sawPath("/search/v2/kcs") {
 		t.Fatalf("the KCS request went somewhere unexpected: %v", api.hits)
 	}
 	if !strings.Contains(api.bodies["POST /search/v2/kcs"], `"rows":5`) {
 		t.Errorf("rows was not sent: %s", api.bodies["POST /search/v2/kcs"])
+	}
+	if got.NumFound != 37134 || got.Returned != 1 {
+		t.Fatalf("numFound=%d returned=%d", got.NumFound, got.Returned)
+	}
+	if got.NumFoundExact == nil || !*got.NumFoundExact {
+		t.Errorf("numFoundExact was not carried through: %v", got.NumFoundExact)
+	}
+	d := got.Documents[0]
+	if d.ID != "7890" || d.DocumentKind != "Solution" || d.Language != "en" {
+		t.Errorf("document = %#v", d)
+	}
+	// One title, not the four the backend sends.
+	if d.Title != "Configuring SELinux booleans" {
+		t.Errorf("title = %q", d.Title)
+	}
+	// The API's own value, passed through.
+	if d.ViewURI != "https://access.redhat.com/solutions/7890" {
+		t.Errorf("viewUri = %q", d.ViewURI)
+	}
+	// The paging note should fire: numFound 37134, 1 returned. It is
+	// phrased as what numFound says rather than as a claim that more
+	// results exist, because the backend may report numFound as an
+	// estimate and does not always say when it did.
+	notes := strings.Join(got.Notes, " ")
+	if !strings.Contains(notes, "start=1") {
+		t.Errorf("no paging note: %v", got.Notes)
+	}
+	if strings.Contains(notes, "more results exist") {
+		t.Errorf("the paging note asserts more results exist, which numFound does not establish: %v", got.Notes)
+	}
+	// Nor should the truncation note promise that viewUri reaches the
+	// full text; neither that it opens nor what it leads to is verified.
+	if strings.Contains(notes, "full text") {
+		t.Errorf("the truncation note promises the full text: %v", got.Notes)
+	}
+}
+
+// The measured problem: one live document was 10 KB, 93% of it the
+// abstract, and the backend's default of ten rows made a 39 KB result.
+// The projection has to drop the bulk and say that it did.
+func TestKCSSearchDropsBulkFieldsAndCutsTheSnippet(t *testing.T) {
+	api := newStubAPI(t)
+	cs := kcsServer(t, api)
+
+	res := call(t, cs, "rhkcs_search", map[string]any{"query": "selinux"})
+	text := resultText(t, res)
+	if res.IsError {
+		t.Fatalf("search failed: %s", text)
+	}
+
+	// Internal fields carry most of the weight and none of the meaning.
+	for _, dropped := range []string{
+		"docs_text_store", "large_text_store", "_version_",
+		"vector_field_set", "resource_uri", "sortTitle", "maxScore",
+	} {
+		if strings.Contains(text, dropped) {
+			t.Errorf("%q survived the projection: result is %d bytes", dropped, len(text))
+		}
+	}
+
+	var got kcsSearchResult
+	decodeResult(t, res, &got)
+	d := got.Documents[0]
+	if !d.SnippetTruncated {
+		t.Fatal("a 200-character abstract was not reported as truncated")
+	}
+	// Counted in runes: the stub's abstract is multi-byte, and cutting
+	// by bytes would both mangle it and leave a different length.
+	if n := utf8.RuneCountInString(d.Snippet); n != redhat.KCSSnippetRunes() {
+		t.Errorf("snippet is %d runes, want %d", n, redhat.KCSSnippetRunes())
+	}
+	if !utf8.ValidString(d.Snippet) {
+		t.Error("the snippet was cut mid-rune")
+	}
+	if !strings.Contains(strings.Join(got.Notes, " "), "cut to") {
+		t.Errorf("truncation was silent: %v", got.Notes)
+	}
+}
+
+// `exp` is listed as required by the document and returns 500 from the
+// service. It must never appear in a request.
+func TestKCSSearchNeverSendsExp(t *testing.T) {
+	api := newStubAPI(t)
+	cs := kcsServer(t, api)
+
+	res := call(t, cs, "rhkcs_search", map[string]any{
+		"query": "selinux", "expression": "sort=score%20DESC",
+	})
+	if res.IsError {
+		t.Fatalf("search failed: %s", resultText(t, res))
+	}
+	body := api.bodies["POST /search/v2/kcs"]
+	if strings.Contains(body, `"exp"`) {
+		t.Fatalf("the request carried exp, which the real service answers with 500: %s", body)
+	}
+	if !strings.Contains(body, `"expression"`) {
+		t.Errorf("expression was not sent: %s", body)
+	}
+}
+
+// The response is unspecified, so an unfamiliar shape is a foreseeable
+// outcome. It must be reported precisely and without the body.
+func TestKCSSearchReportsAnUnrecognizedShapeWithoutTheBody(t *testing.T) {
+	secret := "confidential-article-text-that-must-not-be-echoed"
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Plausible but not the envelope: no response.docs.
+		_, _ = fmt.Fprintf(w, `{"results":[{"body":%q}],"meta":{"total":1}}`, secret)
+	}))
+	defer backend.Close()
+
+	srv := serverAgainst(t, backend.URL, func(c *config.Config) {
+		c.Resources = map[config.Resource]config.ResourceRule{config.ResKCS: {Permission: config.LevelRead}}
+	})
+	cs := connect(t, srv)
+
+	res := call(t, cs, "rhkcs_search", map[string]any{"query": "selinux"})
+	text := resultText(t, res)
+	if res.IsError {
+		t.Fatalf("an unrecognized shape should not be an error: %s", text)
+	}
+	if strings.Contains(text, secret) {
+		t.Fatalf("the unrecognized body was echoed back: %s", text)
+	}
+
+	var got kcsSearchResult
+	decodeResult(t, res, &got)
+	if got.Unrecognized == nil {
+		t.Fatal("an unfamiliar shape was projected as if it were understood")
+	}
+	if len(got.Documents) != 0 {
+		t.Errorf("documents were invented from an unknown shape: %#v", got.Documents)
+	}
+	// Enough for a human to go and look, and nothing more.
+	if got.Unrecognized.SizeBytes == 0 {
+		t.Error("no size reported")
+	}
+	want := map[string]bool{"results": true, "meta": true}
+	for _, k := range got.Unrecognized.TopLevelKeys {
+		delete(want, k)
+	}
+	if len(want) != 0 {
+		t.Errorf("topLevelKeys = %v, missing %v", got.Unrecognized.TopLevelKeys, want)
+	}
+}
+
+func TestKCSSearchClampsRows(t *testing.T) {
+	api := newStubAPI(t)
+	cs := kcsServer(t, api)
+
+	var got kcsSearchResult
+	decodeResult(t, call(t, cs, "rhkcs_search", map[string]any{"query": "selinux", "rows": 500}), &got)
+
+	if !strings.Contains(api.bodies["POST /search/v2/kcs"], fmt.Sprintf(`"rows":%d`, kcsMaxRows)) {
+		t.Fatalf("rows was not clamped to %d: %s", kcsMaxRows, api.bodies["POST /search/v2/kcs"])
+	}
+	if !strings.Contains(strings.Join(got.Notes, " "), "reduced") {
+		t.Errorf("the clamp was silent: %v", got.Notes)
 	}
 }
 

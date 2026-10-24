@@ -348,10 +348,86 @@ type CreateCommentRequest struct {
 }
 
 // SolrSearchRequest mirrors the KCS search body.
+//
+// The document declares `required: ["q", "exp"]` but defines no `exp`
+// property — only `expression`. Running against the live API on
+// 2026-10-25 settled it: `exp` is not required (a body of {q, rows} is
+// answered 200), and sending `exp` is actively harmful (it returns 500).
+// So this struct has no `exp` field and must not grow one.
 type SolrSearchRequest struct {
 	Q          string `json:"q"`
 	Expression string `json:"expression,omitempty"`
 	Start      int64  `json:"start,omitempty"`
 	Rows       int64  `json:"rows,omitempty"`
 	ClientName string `json:"clientName,omitempty"`
+}
+
+// kcsSnippetRunes bounds the excerpt kept from a document.
+//
+// The measurement that set this: in a live response, one document's
+// `abstract` was 9401 of its 10076 bytes — 93% of the record, and at the
+// API's default of ten rows, a 39 KB tool result. A few hundred
+// characters is enough to judge whether an article is worth opening,
+// which is all a search result has to do.
+//
+// It counts runes, not bytes, so a Japanese abstract is cut at the same
+// number of characters as an English one rather than at a third as many.
+const kcsSnippetRunes = 300
+
+// KCSSnippetRunes exposes the excerpt limit so a tool can state it in
+// its output rather than repeating the number.
+func KCSSnippetRunes() int { return kcsSnippetRunes }
+
+// KCSDocument is the projection of one search hit.
+//
+// The live response carries 26 fields per document, most of them
+// internal: four near-identical titles, three URI forms, and a set of
+// vector-index flags. What survives here is what identifies an article
+// and helps decide whether to read it.
+type KCSDocument struct {
+	ID               string `json:"id,omitempty"`
+	Title            string `json:"title,omitempty"`
+	DocumentKind     string `json:"documentKind,omitempty"`
+	Language         string `json:"language,omitempty"`
+	LastModifiedDate string `json:"lastModifiedDate,omitempty"`
+
+	// ViewURI is the API's `view_uri` passed through unchanged. Whether
+	// it is absolute, or openable without a session, is not something
+	// this server has established.
+	ViewURI string `json:"viewUri,omitempty"`
+
+	Snippet string `json:"snippet,omitempty"`
+	// SnippetTruncated says the excerpt was cut, so a reader does not
+	// mistake a clipped abstract for a short one.
+	SnippetTruncated bool `json:"snippetTruncated,omitempty"`
+}
+
+// UnrecognizedPayload describes a response that was not the Solr
+// envelope this code knows how to project.
+//
+// It carries no part of the body. The published document does not model
+// this endpoint's response at all ("200: Solr Response"), so a change in
+// shape is foreseeable rather than exceptional; when it happens the
+// useful thing is to say so precisely and let a human look, not to pour
+// an unknown payload into a model's context.
+type UnrecognizedPayload struct {
+	TopLevelKeys []string `json:"topLevelKeys"`
+	SizeBytes    int      `json:"sizeBytes"`
+	Note         string   `json:"note"`
+}
+
+// KCSResult is a parsed KCS search response.
+//
+// Exactly one of Documents or Unrecognized is meaningful: when the
+// payload did not match the known envelope, Unrecognized is set and no
+// projection was attempted.
+type KCSResult struct {
+	NumFound int `json:"numFound"`
+	// NumFoundExact is the API's own flag for whether NumFound is exact
+	// or an estimate. It is a pointer because an absent flag and a false
+	// one mean different things: absent is "the API did not say".
+	NumFoundExact *bool                `json:"numFoundExact,omitempty"`
+	Start         int                  `json:"start"`
+	Documents     []KCSDocument        `json:"documents"`
+	Unrecognized  *UnrecognizedPayload `json:"unrecognizedShape,omitempty"`
 }

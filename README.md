@@ -243,7 +243,7 @@ offline token を設定ファイル側 (`offlineToken:`) に書くか、MCP ク�
 | `rhcase_list_comments` | `comment: read` | `GET /v3/cases/{caseNumber}/comments` | コメント一覧 (日付範囲・ソート指定可) |
 | `rhcase_get_comment` | `comment: read` | `GET /v3/cases/{caseNumber}/comments/{commentId}` | コメント 1 件 |
 | `rhcase_add_comment` | `comment: write` | `POST /v3/cases/{caseNumber}/comments` | コメント投稿 |
-| `rhkcs_search` | `kcs: read` | `POST /search/v2/kcs` | ナレッジベース検索 (任意機能、既定 OFF) |
+| `rhkcs_search` | `kcs: read` | `POST /search/v2/kcs` | ナレッジベース検索。タイトル・種別・`viewUri`・短い抜粋に射影して返す (任意機能、既定 OFF) |
 
 ### 入出力の設計
 
@@ -381,11 +381,40 @@ security: Bearer (apiKey, in: header, name: Authorization)
 }
 ```
 
-本実装は `properties` 側に合わせて `expression` を送っています。`exp` が旧名なのか誤記なのかは仕様書からは判断できません。実 API で `expression` が受理されるかは **未検証** です (公開仕様だけでは確認できないため)。
+**この不整合は実 API で決着しました** (2026-10-25、`rows: 1` の読み取りのみ)。
+
+| 送ったボディ | 結果 |
+|---|---|
+| `{q, rows}` | `200` — **`exp` は必須ではない** |
+| `{q, rows, expression}` | `200` — 構造は上と同一。`expression` は受理される |
+| `{q, rows, exp}` | **`500`** — `exp` を送ると壊れる |
+| `{q, rows, clientName}` (本実装が送る形) | `200` |
+
+つまり仕様書の `required: ["q", "exp"]` は二重に誤っています。`exp` は必須でないばかりか、**仕様書どおりに送ると `500` になります**。本実装は `expression` のみを送り `exp` を送らないので正しく、`SolrSearchRequest` に `exp` フィールドを足してはいけません。テストで送信ボディに `exp` が現れないことを固定しています。
+
+なお `500` 時のエラー本文は `{message, detailMessage}` で、ケース API と同じ `LegacyApiErrorResponse` としてデコードできました。
 
 ### 2. KCS 検索のレスポンス形状は仕様化されていない
 
-`/search/v2/kcs` の `200` は `"description": "Solr Response"` のみで、スキーマが定義されていません。したがって本実装は **デコードした JSON をそのまま通します**。型付けしていないのは手抜きではなく、根拠のない構造を仕様であるかのように見せないためです。`rhkcs_search` が既定 OFF なのも、この「検証できなさ」が理由のひとつです。
+`/search/v2/kcs` の `200` は `"description": "Solr Response"` のみで、スキーマが定義されていません。**仕様書に書かれていないので、以下は実測した形です** (2026-10-25)。
+
+```
+responseHeader: {status, QTime, zkConnected, params}
+response:       {docs[], numFound, start, maxScore, numFoundExact}
+spellcheck:     {}
+```
+
+`docs[]` の 1 件は 26 フィールドありました。内訳が問題で、**`abstract` だけで 10,076 B 中 9,401 B (93%)** を占め、ほかに同内容のタイトルが 4 種 (`publishedTitle` / `allTitle` / `title` / `sortTitle`)、URI が 3 種、ベクトル索引の内部フラグ (`*_vector_field_set` 等) が並びます。素通しすると API の既定 `rows=10` で 1 回 62 KB になります。
+
+そこで `rhkcs_search` は**射影して返します** — `id` / `title` (4 種から 1 つ) / `documentKind` / `language` / `lastModifiedDate` / `viewUri` / `snippet` と、`numFound` / `numFoundExact` / `start` / 返却件数。実レスポンスに対する実測で **`rows=1` が 13,435 B → 684 B、`rows=10` が 62,436 B → 11,364 B** になります。
+
+- `snippet` は `abstract` を **Unicode 文字数で 300 文字**に切り詰めたものです (バイト数ではないので、日本語でも英語でも同じ文字数になります)。切り詰めた場合は `snippetTruncated` が立ち、`notes` にも出ます。
+- `viewUri` は API の `view_uri` を**そのまま**通した値です。絶対 URL かどうか、セッションなしで開けるかどうかは本サーバーでは確認していません。
+- `numFoundExact` も返します。`numFound` が概数の場合、API 自身がそう申告するためです。
+
+**未知形状時の扱い**: 仕様化されていない以上、形が変わることは例外ではなく想定内です。`response.docs` が無い、あるいは配列として読めない場合は射影を行わず、`unrecognizedShape` として **`topLevelKeys` / `sizeBytes` / 説明だけ**を返します。**本文は一切含めません** — 未知のペイロードをモデルのコンテキストに流し込むより、形が変わったことを正確に伝えて人が見にいくほうが有用なためです。これはエラーではなく通常の結果として返ります。
+
+`rhkcs_search` が既定 OFF なのは変わりません。ケース管理とは別の API 面であり、レスポンスが仕様化されていない点も含めて明示的な opt-in を求めます。
 
 ### 3. コンソール URL は既定値を持たない
 
@@ -416,12 +445,13 @@ security: Bearer (apiKey, in: header, name: Authorization)
 | MCP 経由の実動作 | Go SDK の `CommandTransport` で実プロセスに接続。`tools/list` は 5 件で write ツールは非表示、`rhcase_search` / `rhcase_get` / `rhcase_list_comments` が成功 |
 | `--check-auth` (成功経路) | 固定キーワードを付けた修正版が exit 0 / `tokenExchange: ok` / `apiProbe: ok` / `error` なし |
 | `--check-auth` (失敗経路) | 受理されない値では exit 1 / `tokenExchange: failed` / `apiProbe: skipped`。いずれの経路でも認証情報の露出なし |
+| `POST /search/v2/kcs` | `200`。`{responseHeader, response, spellcheck}` の Solr 形。`exp` を送った場合のみ `500` ([制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない)) |
 
 `GET /v3/cases/{caseNumber}` が返す 73 キーに対し、本実装の `Case` 型は意味のあるフィールドだけを取る射影です ([対象 API](#対象-api) 参照)。未知のキーは無視されるので、仕様書に無いフィールドが増えてもデコードは壊れません。
 
 **v3 ケース API のうち未確認なのは書き込み経路です** — `POST /v3/cases` (作成)、`PUT /v3/cases/{n}` (更新)、`POST /v3/cases/{n}/comments` (コメント投稿)。これらは実行するとサポートケースに取り消せない変更が残るため、読み取りの確認とは別に、対象を決めた上で明示的に実施する必要があります。作成・更新・コメントの応答形状に関する本 README の記述は、現時点では**公開仕様書のみを根拠としています**。
 
-v3 ケース API 以外は**いずれも未検証**です。`rhkcs_search` が使う `POST /search/v2/kcs` は一度も実行しておらず ([制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない))、`apiVersion: v1` の経路も同様です ([制限事項 4](#4-apiversion-v1-は未検証))。
+`POST /search/v2/kcs` は読み取りで確認済みです (上表、および[制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない))。ただし確認したのは `rows` を絞った一般的な検索語での 1 系統だけで、`expression` に凝った Solr 式を渡した場合の挙動や、返りうるフィールドの全体像は把握していません。`apiVersion: v1` の経路は**未検証のまま**です ([制限事項 4](#4-apiversion-v1-は未検証))。
 
 #### `invalid_grant` が返るとき
 
@@ -513,6 +543,7 @@ make test        # go test -race ./...
 - `--check-auth` が SSO 失敗と API 失敗を区別すること、`case: none` でプローブを省略すること、プローブが 1 件しか要求しないこと、出力に認証情報が現れないこと
 - **条件のないフィルタをスタブが実 API と同じ `400` で拒否すること**、プローブがその拒否を踏まないこと、`rhcase_search` が条件なしの呼び出しを送信前に止めること
 - **プローブがマッチした場合でも、応答本文が診断出力に入らないこと** (スタブは検索語に関わらずケースを返すので、マッチする側を直接検証している)。キーワード自体は形式 (長さ・英数字のみ) のみ検証
+- **KCS**: 実測形状のスタブに対する射影 (タイトル 4 重複から 1 つ、`numFoundExact` の伝播、ページング note)、`abstract` の Unicode 300 文字での切り詰めと切断位置の妥当性、`docs_text_store` 等の内部フィールドが出力に残らないこと、送信ボディに `exp` が現れないこと (スタブも `exp` に `500` を返す)、未知形状で本文を返さず構造情報のみ返すこと、`rows` のクランプ
 
 ```
 ok  github.com/konono/rh-sc-mcp/internal/config
