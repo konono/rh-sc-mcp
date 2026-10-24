@@ -1,6 +1,6 @@
 # rh-sc-mcp
 
-Red Hat サポートケース管理 API を MCP (Model Context Protocol) ツールとして公開する Go 製サーバーです。stdio で動作し、Claude Code などの MCP クライアントから Red Hat のサポートケースを検索・参照・作成・更新・コメントできます。
+Red Hat サポートケース管理 API を MCP (Model Context Protocol) ツールとして公開する Go 製サーバーです。Claude Code などの MCP クライアントから Red Hat のサポートケースを検索・参照・作成・更新・コメントできます。トランスポートは **stdio (既定)** と **Streamable HTTP (選択式、既定 OFF)** の 2 つに対応します。
 
 **何を許可するかは operator が設定で決めます。** モデル側からは変更できません。許可レベルを超えるツールは `tools/list` に現れず、ハンドラ側でも呼び出し時に再チェックします。既定は read-only です。
 
@@ -13,6 +13,8 @@ Red Hat サポートケース管理 API を MCP (Model Context Protocol) ツー�
 - [ビルド](#ビルド)
 - [設定](#設定)
 - [MCP クライアントからの接続](#mcp-クライアントからの接続)
+  - [stdio で接続する](#stdio-で接続する)
+  - [HTTP で接続する](#http-で接続する)
 - [HTTP で公開する](#http-で公開する)
 - [コンテナと Kubernetes / OpenShift](#コンテナと-kubernetes--openshift)
 - [提供ツール](#提供ツール)
@@ -208,15 +210,26 @@ RH_SC_OFFLINE_TOKEN="$(tr -d '\r\n' < token)" ./bin/rh-sc-mcp --check-auth
 
 ## MCP クライアントからの接続
 
-既定は stdio トランスポートです。共有デプロイ向けに Streamable HTTP も選べます ([HTTP で公開する](#http-で公開する))。
+登録方法はトランスポートで変わります。
 
-### Claude Code
+| | stdio (既定) | Streamable HTTP |
+|---|---|---|
+| サーバーの起動 | クライアントが起動する | 運用者が常駐させる |
+| クライアント設定 | `command` + `args` | `type: http` + `url` + `headers` |
+| 認証 | 不要 (OS が制御) | 共有 bearer token が必須 |
+| offline token | クライアント側に必要 | **サーバー側のみ**。クライアントは持たない |
+
+HTTP の場合、クライアントが持つのは共有 bearer token だけで、Red Hat の offline token はサーバー側に留まります。これが HTTP 構成の利点です。
+
+### stdio で接続する
+
+#### Claude Code
 
 ```bash
 claude mcp add rh-sc -- /path/to/rh-sc-mcp --config /path/to/config.yaml
 ```
 
-### 設定ファイルで直接書く場合
+#### 設定ファイルで直接書く場合
 
 ```json
 {
@@ -235,6 +248,93 @@ claude mcp add rh-sc -- /path/to/rh-sc-mcp --config /path/to/config.yaml
 offline token を設定ファイル側 (`offlineToken:`) に書くか、MCP クライアントの `env` で渡すかは運用次第です。`env` に書くとそのクライアントの設定ファイルにも秘密が広がる点に注意してください (エージェントが読める場所であることが多い)。
 
 ログは **stderr** に出ます。stdout は MCP のトランスポートなので、プロトコルフレーム以外は一切流しません。
+
+### HTTP で接続する
+
+サーバー側の立て方は [HTTP で公開する](#http-で公開する) を参照してください。ここはクライアント側の登録です。
+
+#### 推奨: `.mcp.json` に書き、token は環境変数で渡す
+
+プロジェクトの `.mcp.json` に次を置きます。**token の実値はここに書きません** — `${VAR}` 形式で環境変数を参照します ([Claude Code の MCP ドキュメント](https://code.claude.com/docs/en/mcp) に記載された展開機能)。
+
+```json
+{
+  "mcpServers": {
+    "rh-sc-http": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${RH_SC_MCP_HTTP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+クライアントを起動する環境に、**サーバー側と同じ共有 token** を入れておきます。値はシークレットストアから渡すのが最善です。
+
+```bash
+# 例: シークレットストアから取り出して渡す
+RH_SC_MCP_HTTP_TOKEN="$(your-secret-tool read rh-sc-mcp/httpToken)" claude
+```
+
+手で入力する場合は、**エコーしない読み取り**を使ってください。
+
+```bash
+read -rs RH_SC_MCP_HTTP_TOKEN && export RH_SC_MCP_HTTP_TOKEN
+claude
+```
+
+`export RH_SC_MCP_HTTP_TOKEN="<実値>"` と直接打つのは避けます。**そのコマンド自体がシェル履歴に残ります。**
+
+この形で避けられるのは、**設定ファイルとコマンド引数への実値の記載**です。`.mcp.json` は実値を含まないのでリポジトリに追跡させられ、共有しても秘密は広がりません。一方で**値は Claude Code の環境変数としては存在します**。秘密が消えるわけではなく、置き場所を 1 箇所に絞っているだけだと理解してください。
+
+#### URL の指定
+
+| 用途 | URL |
+|---|---|
+| ローカルで動かしたサーバーに繋ぐ | `http://127.0.0.1:8080/mcp` |
+| リモートのサーバーに繋ぐ | `https://mcp.example.com/mcp` |
+
+パスは常に `/mcp` です。リモートでは **HTTPS が必須** です — bearer token は毎リクエストのヘッダに乗るので、平文 HTTP は経路上の誰にでも token を渡します。ローカルの `127.0.0.1` はループバックに閉じるため平文で構いません。
+
+#### 接続の確認
+
+project scope の `.mcp.json` は、**初回にワークスペースの信頼とサーバーの承認を求められることがあります**。承認前は接続されず、状態は「Pending approval」と表示されます。承認は対話的な `claude` セッションで行います。
+
+**承認する前に、`url` と、`Authorization` ヘッダがどこへ送られるかを確認してください。** `.mcp.json` はリポジトリで共有されるファイルなので、自分が書いたとは限りません。承認するということは、その URL に毎リクエスト共有 token を送ることに同意するということです。
+
+```bash
+claude mcp get rh-sc-http
+```
+
+承認後は health check が走ります。なお `claude mcp get` は **ヘッダを設定ファイルに書かれたまま (`Bearer ${RH_SC_MCP_HTTP_TOKEN}`) 表示します** — 展開後の値は出ません。したがってこの出力は「環境変数が正しく設定されているか」の確認には使えません。実際に繋がっているかは、承認後に `claude` セッション内で `/mcp` を実行してサーバーとツールが見えることで確認してください。
+
+#### `--header` を使わない理由
+
+公式ドキュメントには CLI での追加例もあります。
+
+```bash
+# 推奨しません
+claude mcp add --transport http rh-sc-http https://mcp.example.com/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+この形だと **token の実値がコマンド引数に乗ります**。実行中は `ps` の出力やプロセス一覧から同じ機械の他プロセスに見え、さらに登録先の設定ファイルにも実値が書き込まれます。実値を直接打った場合は、そのコマンド行がシェル履歴にも残ります。
+
+`.mcp.json` + 環境変数参照なら、**設定ファイルとコマンド引数への実値の記載を避けられます**。ただし値は Claude Code の環境変数としては存在します — 「どこにも残らない」わけではありません。その環境変数をどう用意するかは[前述](#推奨-mcpjson-に書きtoken-は環境変数で渡す)のとおり別途注意が要ります。
+
+同じ理由で、**token を追跡対象のファイルに直接書かないでください**。`.mcp.json` に `${VAR}` ではなく実値を書くと、そのままコミットされます。
+
+#### 検証状況
+
+この環境 (Claude Code 2.1.310) で確認したのは次の範囲です。
+
+- `.mcp.json` の `type: http` / `url` / `headers` という構文が受理され、HTTP サーバーとして認識されること
+- `claude mcp get` が type / URL / ヘッダを表示し、ヘッダの `${VAR}` を未展開のまま出すこと
+- `claude mcp add --transport http ... --header` が存在し、値が引数に乗ること
+
+`${VAR}` が接続時に実際に展開されることは**公式ドキュメントの記載に依拠**しており、この環境では確認していません。project scope の承認は対話セッションを要し、非対話では接続まで到達できなかったためです。
 
 ---
 
