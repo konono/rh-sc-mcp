@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -24,6 +25,7 @@ func main() {
 		printScope  = flag.Bool("print-scope", false, "print the resolved scope and the tools it exposes, then exit")
 		checkAuth   = flag.Bool("check-auth", false, "exchange the offline token and probe the API, then exit; prints no credential")
 		showVersion = flag.Bool("version", false, "print version and exit")
+		httpAddr    = flag.String("http", "", "serve MCP over Streamable HTTP on this address (e.g. :8080) instead of stdio; also `http.addr` or $RH_SC_MCP_HTTP_ADDR")
 	)
 	flag.Parse()
 
@@ -37,6 +39,14 @@ func main() {
 		fatal(err)
 	}
 
+	// --http is applied after Load, so the checks Load ran never saw it:
+	// a config with no bearer token is valid right up until this flag
+	// turns the transport on. OverrideHTTPAddr re-runs the same rules
+	// rather than leaving them to be re-stated here and drift.
+	if err := cfg.OverrideHTTPAddr(*httpAddr); err != nil {
+		fatal(err)
+	}
+
 	srv := server.New(cfg)
 
 	// stderr, not stdout: stdout is the MCP transport and must carry
@@ -46,7 +56,7 @@ func main() {
 	}
 
 	if *printScope {
-		printResolvedScope(cfg, srv)
+		printResolvedScope(srv)
 		return
 	}
 
@@ -71,43 +81,27 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := srv.Run(ctx); err != nil && ctx.Err() == nil {
-		fatal(err)
+	// stderr in both modes: on stdio, stdout is the transport.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	var runErr error
+	if cfg.HTTP.Enabled() {
+		runErr = srv.ServeHTTP(ctx, logger)
+	} else {
+		runErr = srv.Run(ctx)
+	}
+	if runErr != nil && ctx.Err() == nil {
+		fatal(runErr)
 	}
 }
 
 // printResolvedScope reports the effective configuration.
 //
-// It deliberately prints no credential, not even a fingerprint of one:
-// the usual place this output ends up is a bug report.
-func printResolvedScope(cfg *config.Config, srv *server.Server) {
-	resources := map[string]string{}
-	for _, r := range config.AllResources {
-		resources[string(r)] = cfg.LevelFor(r).String()
-	}
-	// An empty list rather than null: this output is read by people and
-	// by scripts, and "warnings": null invites a nil dereference in both.
-	warnings := cfg.Warnings()
-	if warnings == nil {
-		warnings = []string{}
-	}
-	out := map[string]any{
-		"endpoint":    cfg.BaseURL,
-		"apiVersion":  cfg.APIVersion,
-		"ssoTokenURL": cfg.SSOTokenURL,
-		"ssoClientID": cfg.SSOClientID,
-		"readOnly":    cfg.IsReadOnly(),
-		"resources":   resources,
-		"tools":       srv.Registered(),
-		"maxResults":  cfg.MaxResults,
-		"maxComments": cfg.MaxComments,
-		"timeoutSec":  cfg.TimeoutSeconds,
-		"warnings":    warnings,
-	}
-	if cfg.CaseViewURL != "" {
-		out["caseViewURL"] = cfg.CaseViewURL
-	}
-	b, err := json.MarshalIndent(out, "", "  ")
+// The payload is built in the server package so it can be tested; the
+// one thing that matters about it is that it contains no credential,
+// and the usual destination for this output is a bug report.
+func printResolvedScope(srv *server.Server) {
+	b, err := json.MarshalIndent(srv.ScopeReport(), "", "  ")
 	if err != nil {
 		fatal(err)
 	}

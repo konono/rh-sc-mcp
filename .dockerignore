@@ -1,0 +1,17 @@
+.git
+.github
+bin
+dist
+deploy
+examples
+.panecom
+*.md
+
+# Never copy a credential into a build context.
+token
+token.*
+*.token
+config.yaml
+config.local.yaml
+*.local.yaml
+.env

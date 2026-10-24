@@ -13,6 +13,8 @@ Red Hat サポートケース管理 API を MCP (Model Context Protocol) ツー�
 - [ビルド](#ビルド)
 - [設定](#設定)
 - [MCP クライアントからの接続](#mcp-クライアントからの接続)
+- [HTTP で公開する](#http-で公開する)
+- [コンテナと Kubernetes / OpenShift](#コンテナと-kubernetes--openshift)
 - [提供ツール](#提供ツール)
 - [対象 API](#対象-api)
 - [認証の仕組み](#認証の仕組み)
@@ -96,6 +98,11 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 | `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`=`none` | リソースごとの `none` / `read` / `write` |
 | `caseViewURL` | (なし) | 人間向けリンクの接頭辞。未設定なら `caseUrl` を出力しない |
 | `maxResults` | `50` | 検索 1 回あたりのケース数上限 (API 側上限は 200) |
+| `http.addr` | (なし) | HTTP の待受アドレス。空なら HTTP 無効 (既定 OFF) |
+| `http.token` | (なし) | 共有 bearer token。`http.addr` 設定時は必須、offline token と同値は不可 |
+| `http.stateless` | `true` | セッションを持たない。複数レプリカ運用の既定 |
+| `http.sessionTimeoutSeconds` | `0` | stateful 時のみ有効 |
+| `http.trustedOrigins` | `[]` | cross-origin チェックで追加許可する Origin |
 | `maxComments` | `50` | コメント一覧の件数上限 (クライアント側で切り詰め) |
 | `timeoutSeconds` | `60` | 上流 HTTP 1 回あたりの制限時間 |
 
@@ -110,6 +117,8 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 | `RH_SC_SSO_CLIENT_ID` | `ssoClientID` |
 | `RH_SC_READ_ONLY` | `readOnly` (`true`/`false`) |
 | `RH_SC_MCP_CONFIG` | `--config` のパス |
+| `RH_SC_MCP_HTTP_ADDR` | `http.addr` |
+| `RH_SC_MCP_HTTP_TOKEN` | `http.token` |
 
 ### 権限モデル
 
@@ -199,7 +208,7 @@ RH_SC_OFFLINE_TOKEN="$(tr -d '\r\n' < token)" ./bin/rh-sc-mcp --check-auth
 
 ## MCP クライアントからの接続
 
-stdio トランスポートで動作します。
+既定は stdio トランスポートです。共有デプロイ向けに Streamable HTTP も選べます ([HTTP で公開する](#http-で公開する))。
 
 ### Claude Code
 
@@ -226,6 +235,181 @@ claude mcp add rh-sc -- /path/to/rh-sc-mcp --config /path/to/config.yaml
 offline token を設定ファイル側 (`offlineToken:`) に書くか、MCP クライアントの `env` で渡すかは運用次第です。`env` に書くとそのクライアントの設定ファイルにも秘密が広がる点に注意してください (エージェントが読める場所であることが多い)。
 
 ログは **stderr** に出ます。stdout は MCP のトランスポートなので、プロトコルフレーム以外は一切流しません。
+
+---
+
+## HTTP で公開する
+
+既定の stdio では、クライアントがサーバーを起動し、誰が話しかけられるかは OS が決めます。共有デプロイ向けに MCP の [Streamable HTTP][streamable] トランスポートも使えます。
+
+```bash
+export RH_SC_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
+rh-sc-mcp --config config.yaml --http :8080
+```
+
+[streamable]: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+
+| パス | 認証 | 用途 |
+|---|---|---|
+| `/mcp` | Bearer token | MCP エンドポイント |
+| `/healthz` | なし | liveness |
+| `/readyz` | なし | readiness |
+
+### token を持つ相手が到達できる範囲
+
+共有 bearer token を提示できたクライアントは、**この設定の scope が許す範囲すべて**に到達します。scope の中では、ケースの絞り込みは一切ありません — つまり **offline token の持ち主から見えるケースはすべて見えます**。特定のケースやアカウントに限定する機能は本サーバーにはありません。
+
+絞り込めるのはリソース種別 (`case` / `comment` / `kcs`) と読み書きの別だけです。閲覧範囲そのものを狭めたい場合は、**より権限の狭い Red Hat アカウントの offline token を使う**しかありません。token は全クライアントで共有なので、クライアントごとに見える範囲を変えることもできません。
+
+### 共有 bearer token は必須、かつ offline token とは別物
+
+token が無いまま HTTP を有効にするとサーバーは**起動しません**。stdio では OS がアクセスを制御しますが、開いたポートはそうではなく、このプロセスは組織のサポートケースに到達できます。
+
+さらに、**共有 token に offline token と同じ文字列は使えません**。同値の場合も起動時にエラーになります。共有 token は全 MCP クライアントに配るものなので、同じにすると各クライアントが Red Hat の認証情報そのものを持つことになり、本サーバーの scope を迂回してサポート API を直接叩けてしまいます。
+
+```bash
+# 生成
+openssl rand -hex 32
+```
+
+エラーメッセージにはどちらの値も載せません。この種の出力はバグ報告に貼られるためです。
+
+### プローブ
+
+`/healthz` と `/readyz` は意図的に無認証です。kubelet は提示できる token を持ちません。
+
+両者は「このプロセスが応答している」ことだけを返し、**SSO にも Red Hat API にも触れません**。触れる実装にすると、ポーリングのたびに token 交換を消費し、上流の一時的な不調でプローブが落ちて再起動ループになります。テストでは、プローブを叩いたあと API スタブへのリクエストが 0 件であることを確認しています。
+
+### 設定
+
+```yaml
+http:
+  addr: ":8080"                 # --http / $RH_SC_MCP_HTTP_ADDR でも指定可
+  token: xxxxx                  # $RH_SC_MCP_HTTP_TOKEN を推奨
+  stateless: true               # 既定
+  sessionTimeoutSeconds: 300    # stateful (stateless: false) のときのみ
+  trustedOrigins: []            # cross-origin チェックで追加許可する Origin
+```
+
+`addr` の優先順は `--http` フラグ > `$RH_SC_MCP_HTTP_ADDR` > `http.addr` です。いずれも空なら HTTP は無効で、stdio のままです (**既定 OFF**)。
+
+`--http` はコマンドラインから後付けで有効化する経路なので、**フラグ適用後にも token 必須・offline token 同値・アドレス形式の検証をやり直します**。設定ファイルに token が無い構成は、フラグが付くまでは正当だからです。
+
+`stateless` が既定 true なのは、複数レプリカを 1 つの Service の背後に sticky routing なしで置けるようにするためです。サーバー発のメッセージが必要な単一インスタンスでのみ false にしてください。
+
+cross-origin 保護と DNS rebinding 保護は既定で有効です。ブラウザ上のページがユーザーの資格情報を使ってこのエンドポイントを操作すること、および localhost にバインドしたサーバーへ rebind されたホスト名で到達することを防ぎます。
+
+### 権限モデルはトランスポートに依存しません
+
+HTTP でも stdio とまったく同じ scope が適用されます。read-only 既定なら `tools/list` に write ツールは現れず、呼び出しても拒否されます。トランスポートが変わるのは経路だけで、ポリシーは変わりません (HTTP 経由の実通信テストで確認しています)。
+
+`--print-scope` には HTTP の設定も出ますが、**token は値も長さも接頭辞も出しません**。`tokenConfigured: true/false` だけです。
+
+```bash
+rh-sc-mcp --config config.yaml --print-scope | jq .http
+```
+
+```json
+{
+  "enabled": true,
+  "tokenConfigured": true,
+  "addr": ":8080",
+  "path": "/mcp",
+  "stateless": true,
+  "trustedOrigins": []
+}
+```
+
+設定例は [`examples/http-server.yaml`](examples/http-server.yaml) にあります。
+
+---
+
+## コンテナと Kubernetes / OpenShift
+
+`Dockerfile` と `deploy/` は、参照実装と同じ利用形態を再現するための**例**です。**イメージは公開していません** — `ghcr.io/konono/rh-sc-mcp` は例示値です。自分で build して自分が管理するレジストリに push してください。
+
+```bash
+docker build -t registry.example.com/your-org/rh-sc-mcp:v0.1.0 .
+docker push registry.example.com/your-org/rh-sc-mcp:v0.1.0
+```
+
+### イメージの差し替え方
+
+`deploy/base/kustomization.yaml` の `images:` を書き換えます。ここで**`name` は変更しません**。`name` は「どのイメージを置換するか」の照合キーで、`deployment.yaml` に書かれた値と一致している必要があります。ここを自分のレジストリに書き換えると照合が外れ、**kustomize は何も置換せず元の値のまま出力します** (エラーも警告も出ません)。
+
+変えるのは `newName` と `newTag` です。
+
+```yaml
+images:
+  - name: ghcr.io/konono/rh-sc-mcp              # 照合キー。触らない
+    newName: registry.example.com/your-org/rh-sc-mcp
+    newTag: v0.1.0
+```
+
+適用前に、置換後のイメージを目で確認してください。
+
+```bash
+kubectl kustomize deploy/overlays/kubernetes | grep 'image:'
+kubectl kustomize deploy/overlays/openshift  | grep 'image:'
+# → image: registry.example.com/your-org/rh-sc-mcp:v0.1.0
+```
+
+`ghcr.io/konono/...` のままなら、`name` を書き換えてしまっているか、`newName` を設定していません。
+
+### 認証情報と scope
+
+```bash
+# 1. 認証情報。offline token と共有 HTTP token は別の値にすること。
+kubectl create secret generic rh-sc-mcp \
+  --from-literal=offlineToken="$RH_SC_OFFLINE_TOKEN" \
+  --from-literal=httpToken="$(openssl rand -hex 32)"
+
+# 2. scope。readOnly と resources を確認する。
+$EDITOR deploy/base/config.yaml
+```
+
+`deploy/base/secret.example.yaml` は `REPLACE_ME` 入りのテンプレートです。実値を入れたファイルは `.gitignore` 済み (`deploy/**/secret.yaml` 等) なので、サンプルだけが追跡されます。
+
+### 適用前の確認
+
+```bash
+kubectl kustomize deploy/overlays/kubernetes
+kubectl kustomize deploy/overlays/openshift
+```
+
+### OpenShift
+
+`Route` は `host` を省いているのでクラスタが生成し、`termination: edge` がルーターの既定証明書を使います。追加の編集は不要です。
+
+```bash
+oc apply -k deploy/overlays/openshift
+```
+
+### Kubernetes
+
+`Ingress` は**そのままでは適用できません**。あなたにしか用意できない 2 つの値がプレースホルダになっています。
+
+```bash
+# 3. ホスト名 (rh-sc-mcp.example.com を 2 箇所)
+$EDITOR deploy/overlays/kubernetes/ingress.yaml
+
+# 4. そのホスト名の TLS 証明書 (cert-manager 等が発行するなら不要)
+kubectl create secret tls rh-sc-mcp-tls --cert=tls.crt --key=tls.key
+
+kubectl apply -k deploy/overlays/kubernetes
+```
+
+**TLS は必須です。** bearer token は毎リクエストのヘッダに乗るので、平文 HTTP は経路上の誰にでも token を渡します。
+
+### マニフェストの中身
+
+`deploy/base` に Deployment / Service と、`deploy/base/config.yaml` から生成される ConfigMap があります。認証情報は Secret に置くので、scope は git でレビューしつつ token は入れない構成です。kustomize が ConfigMap 名をハッシュ化するため、scope を変えると Pod が入れ替わります (scope は起動時に 1 度しか読まないので、これが無いと編集が反映されません)。
+
+マニフェストは、コンテナを非 root・read-only root filesystem・全 capability drop・`RuntimeDefault` seccomp で動かす設定にしています。イメージは `USER 65532:65532` を宣言しています (マニフェストの `runAsNonRoot` が数値の UID を必要とするため)。一方 OpenShift の `restricted-v2` SCC は namespace のレンジから任意の UID を割り当て、イメージの `USER` を無視します。
+
+**任意の UID でも動くよう、ファイルの書き込みと特定 UID への依存を避けた設計です** — プロセスはファイルを書かず、バイナリは誰でも読める配置に置いています。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。**ただしコンテナ実行自体は未検証です** ([制限事項 7](#7-コンテナイメージの-build-は未検証))。これは設計上の意図であって、動作を確認した結果ではありません。
+
+OpenShift overlay の `Route` には 300 秒の HAProxy タイムアウトを付けています。streamed な MCP 応答は開いたままになるため、ルーターの既定 30 秒では切られます。Kubernetes overlay は代わりに `Ingress` を置きます。どちらも公開するのは `/mcp` だけで、プローブはクラスタ内に留めます。
 
 ---
 
@@ -472,7 +656,11 @@ spellcheck:     {}
 
 なお、この乖離はスタブに対するテストでは発見できませんでした。発見後、スタブ側にも同じ拒否を実装してあるので、プローブから条件を外すと該当テストが落ちます。
 
-### 7. severity / status / product の値は検証しない
+### 7. コンテナイメージの build は未検証
+
+`Dockerfile` は参照実装に合わせて用意しましたが、**この環境に Docker CLI が無いため build を実行していません**。確認したのは、同じビルド構成 (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64` でのクロスコンパイル) が通ることと、`deploy/` の両オーバーレイが `kubectl kustomize` でレンダリングできることまでです。コンテナ内での実行、`distroless` ベースとの組み合わせ、`USER 65532` での動作は未確認です。
+
+### 8. severity / status / product の値は検証しない
 
 仕様書がこれらの列挙値を定義していないため、`"4 (Low)"` のような値をサーバー側で検証することはしていません。誤った値は上流のエラーとして返ります。一方、仕様書が値を明示している項目 (`contentType`、`createdByType`、コメントの `sortField` / `sortOrder`、ケース検索の `sortOrder`) は検証・正規化します。
 
@@ -540,6 +728,21 @@ make test        # go test -race ./...
 - 上流エラーがモデルに届き、かつ Bearer トークンが混ざらないこと
 - **実際の経路 (SSO 交換 → クライアント → MCP 往復) で、`200` + HTML を返す上流に対し `rhcase_get` / `rhcase_create` / `rhcase_add_comment` がツールエラーになり、access token も offline token もモデル出力に現れないこと**
 - 生成された入力スキーマに必須項目が立っていること、write ツールが `readOnlyHint` を名乗らないこと
+**HTTP トランスポート (`internal/server/http_test.go`, `internal/config`)**
+- Bearer 必須 (未提示 / 誤り / 正しい token の接頭辞 / offline token を提示 → すべて 401、正しい token のみ 200)、拒否時に API へ 1 件も到達しないこと
+- 401 応答が token の値を body にも `WWW-Authenticate` にも載せないこと
+- token 無し、および offline token と同値では `Handler()` が構築を拒否すること (設定検証に依存しない二重化)
+- プローブ 2 本が無認証で 200 を返し、scope / ツール名 / token を漏らさず、**API スタブへのリクエストが 0 件**であること
+- cross-origin: 許可外 Origin が拒否され、`trustedOrigins` に追加すると通り、他の Origin は依然拒否されること
+- `stateless` 既定 true、`stateless: false` + `sessionTimeoutSeconds` が反映され handler が構築できること
+- 実 HTTP (`httptest` + `StreamableClientTransport`) で initialize → `tools/list` → `tools/call`。read ツールが見え、write 3 ツールは列挙されず、呼んでも拒否されること
+- `initialize` が JSON-RPC の result を返し `serverInfo.name` が一致すること
+- ctx キャンセルで `ServeHTTP` が drain して nil を返すこと
+- 起動失敗: `http.addr` だけで token 無し / token が offline token と同値 / ポートの無いアドレス / 負の `sessionTimeoutSeconds` / 空の `trustedOrigins` 要素
+- `--http` 上書き後の再検証 (token 無し・offline token 同値・不正アドレスを弾き、正当な上書きは通し、空の上書きは設定を変えないこと)
+- 環境変数が設定ファイルより優先されること、HTTP 有効化で警告が出ること
+- `--print-scope` 相当の出力が HTTP 設定を伝えつつ token も接頭辞も含まないこと
+
 - `--check-auth` が SSO 失敗と API 失敗を区別すること、`case: none` でプローブを省略すること、プローブが 1 件しか要求しないこと、出力に認証情報が現れないこと
 - **条件のないフィルタをスタブが実 API と同じ `400` で拒否すること**、プローブがその拒否を踏まないこと、`rhcase_search` が条件なしの呼び出しを送信前に止めること
 - **プローブがマッチした場合でも、応答本文が診断出力に入らないこと** (スタブは検索語に関わらずケースを返すので、マッチする側を直接検証している)。キーワード自体は形式 (長さ・英数字のみ) のみ検証

@@ -1,0 +1,28 @@
+# Scope for the deployed server. Edit before applying.
+#
+# Credentials are not here: the offline token and the shared HTTP token
+# come from a Secret as environment variables, so this file can be
+# reviewed in git while they are not.
+
+http:
+  addr: ":8080"          # also set via RH_SC_MCP_HTTP_ADDR
+  stateless: true        # lets several replicas share one Service
+  trustedOrigins: []
+
+# Read-only. Turn this off, and grant write per resource, only if the
+# deployment is meant to create cases or post comments — both are
+# visible to Red Hat and to everyone on the account, and neither can be
+# withdrawn.
+readOnly: true
+
+resources:
+  case:
+    permission: read
+  comment:
+    permission: read
+  # kcs:
+  #   permission: read
+
+maxResults: 50
+maxComments: 50
+timeoutSeconds: 60

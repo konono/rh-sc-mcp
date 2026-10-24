@@ -4,9 +4,15 @@ dist/
 # Local panecom pane/session state, not part of the project.
 .panecom/
 
-# Real configuration holds an offline token. Only the example is tracked.
-config.yaml
-config.local.yaml
+# The operator's own configuration holds an offline token. Only the
+# example is tracked.
+#
+# Anchored to the repository root on purpose. Without the leading slash
+# these patterns match at every depth, which would also hide
+# deploy/base/config.yaml — a scope-only file that has to be tracked for
+# `kubectl kustomize` to resolve its configMapGenerator.
+/config.yaml
+/config.local.yaml
 *.local.yaml
 .env
 
@@ -15,3 +21,14 @@ config.local.yaml
 token
 token.*
 *.token
+
+# Kubernetes Secrets. Only deploy/base/secret.example.yaml is tracked —
+# it is a template with REPLACE_ME placeholders. A filled-in copy holds
+# both the Red Hat offline token and the shared HTTP token, and the two
+# are a file rename away from each other, so the real ones are excluded
+# by name rather than by discipline.
+deploy/**/secret.yaml
+deploy/**/secret-*.yaml
+deploy/**/*.local.yaml
+secret.yaml
+!deploy/base/secret.example.yaml

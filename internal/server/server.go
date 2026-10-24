@@ -76,6 +76,55 @@ func (s *Server) Run(ctx context.Context) error {
 // transport to it.
 func (s *Server) MCP() *mcp.Server { return s.mcp }
 
+// ScopeReport is the --print-scope payload.
+//
+// It lives here rather than in main so it can be tested: its one hard
+// requirement is that no credential appears in it, and that is worth a
+// test rather than a careful reading. The HTTP token is reported as
+// present or absent, never as a value — not even a prefix or a length,
+// either of which would narrow a guess.
+func (s *Server) ScopeReport() map[string]any {
+	resources := map[string]string{}
+	for _, r := range config.AllResources {
+		resources[string(r)] = s.cfg.LevelFor(r).String()
+	}
+	warnings := s.cfg.Warnings()
+	if warnings == nil {
+		warnings = []string{}
+	}
+	httpInfo := map[string]any{
+		"enabled":         s.cfg.HTTP.Enabled(),
+		"tokenConfigured": s.cfg.HTTP.Token != "",
+	}
+	if s.cfg.HTTP.Enabled() {
+		httpInfo["addr"] = s.cfg.HTTP.Addr
+		httpInfo["path"] = MCPPath
+		httpInfo["stateless"] = s.cfg.HTTP.IsStateless()
+		httpInfo["trustedOrigins"] = s.cfg.HTTP.TrustedOrigins
+		if !s.cfg.HTTP.IsStateless() {
+			httpInfo["sessionTimeoutSeconds"] = s.cfg.HTTP.SessionTimeoutSeconds
+		}
+	}
+	out := map[string]any{
+		"endpoint":    s.cfg.BaseURL,
+		"apiVersion":  s.cfg.APIVersion,
+		"ssoTokenURL": s.cfg.SSOTokenURL,
+		"ssoClientID": s.cfg.SSOClientID,
+		"readOnly":    s.cfg.IsReadOnly(),
+		"resources":   resources,
+		"tools":       s.Registered(),
+		"maxResults":  s.cfg.MaxResults,
+		"maxComments": s.cfg.MaxComments,
+		"timeoutSec":  s.cfg.TimeoutSeconds,
+		"warnings":    warnings,
+		"http":        httpInfo,
+	}
+	if s.cfg.CaseViewURL != "" {
+		out["caseViewURL"] = s.cfg.CaseViewURL
+	}
+	return out
+}
+
 // AuthCheck is the result of --check-auth.
 //
 // It deliberately holds no credential, not even a fingerprint: the usual

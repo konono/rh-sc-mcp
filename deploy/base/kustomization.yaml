@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+configMapGenerator:
+  - name: rh-sc-mcp
+    files:
+      - config.yaml
+
+# A generated name changes when the scope changes, which rolls the pods.
+# The scope is read once at startup, so without this an edit would sit
+# unapplied until something else happened to restart them.
+generatorOptions:
+  disableNameSuffixHash: false
+
+images:
+  # `name` is the match key: it has to keep matching the image written in
+  # deployment.yaml, or kustomize finds nothing to rewrite and silently
+  # leaves the original in place. To point at your own registry, leave
+  # this line alone and set newName/newTag below.
+  - name: ghcr.io/konono/rh-sc-mcp
+    # Nothing is published under that name. Build the image yourself and
+    # uncomment this, pointing at a registry you control:
+    # newName: registry.example.com/your-org/rh-sc-mcp
+    newTag: latest

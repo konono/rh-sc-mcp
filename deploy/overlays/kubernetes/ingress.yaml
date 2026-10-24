@@ -1,0 +1,35 @@
+# Not applicable as shipped: the hostname and the TLS secret below are
+# placeholders, and only you can supply them. See the Kubernetes section
+# of the README.
+#
+# The OpenShift overlay needs no equivalent edit — its Route omits `host`,
+# so the cluster generates one and terminates TLS with the router's own
+# certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rh-sc-mcp
+  labels:
+    app.kubernetes.io/name: rh-sc-mcp
+spec:
+  rules:
+    # CHANGE ME: the hostname clients will connect to.
+    - host: rh-sc-mcp.example.com
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: rh-sc-mcp
+                port:
+                  name: http
+  tls:
+    # TLS is required, not decorative: the bearer token travels in a
+    # header on every request, so plain HTTP hands it to anything on the
+    # path.
+    - hosts:
+        # CHANGE ME: must match the host above.
+        - rh-sc-mcp.example.com
+      # CHANGE ME, or let cert-manager create a secret with this name.
+      secretName: rh-sc-mcp-tls

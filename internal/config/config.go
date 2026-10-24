@@ -13,6 +13,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -132,6 +133,45 @@ type ResourceRule struct {
 	Permission Level `yaml:"permission"`
 }
 
+// HTTPScope configures the Streamable HTTP transport.
+//
+// It is off unless an address is set, so the default stays stdio: a stdio
+// server is reachable only by the process that launched it, while an open
+// port is reachable by anything that can connect to it — and this process
+// can read, and possibly write, Red Hat support cases.
+type HTTPScope struct {
+	// Addr is the listen address, e.g. "127.0.0.1:8080" or ":8080".
+	// Empty disables the HTTP transport. Overridden by
+	// $RH_SC_MCP_HTTP_ADDR and by the --http flag.
+	Addr string `yaml:"addr"`
+
+	// Token is the shared bearer token every MCP client must present.
+	// Prefer $RH_SC_MCP_HTTP_TOKEN so it can come from a secret store.
+	//
+	// It is required whenever Addr is set, and it must differ from the
+	// offline token (see validateHTTP).
+	Token string `yaml:"token"`
+
+	// Stateless serves each request with a temporary session instead of
+	// tracking Mcp-Session-Id, which is what lets several replicas sit
+	// behind one Service without sticky routing. It defaults to true.
+	Stateless *bool `yaml:"stateless"`
+
+	// SessionTimeoutSeconds closes idle sessions. Ignored when Stateless.
+	SessionTimeoutSeconds int `yaml:"sessionTimeoutSeconds"`
+
+	// TrustedOrigins are additional Origin header values accepted by the
+	// cross-origin check. A browser is not the expected client, so this
+	// is normally empty.
+	TrustedOrigins []string `yaml:"trustedOrigins"`
+}
+
+// Enabled reports whether the HTTP transport should be served.
+func (h HTTPScope) Enabled() bool { return strings.TrimSpace(h.Addr) != "" }
+
+// IsStateless reports the effective statelessness, defaulting to true.
+func (h HTTPScope) IsStateless() bool { return h.Stateless == nil || *h.Stateless }
+
 // Config is the full server configuration.
 type Config struct {
 	// BaseURL is the case API root, including the basePath. It defaults to
@@ -187,6 +227,9 @@ type Config struct {
 
 	// TimeoutSeconds bounds a single upstream HTTP call.
 	TimeoutSeconds int `yaml:"timeoutSeconds"`
+
+	// HTTP configures the Streamable HTTP transport, off by default.
+	HTTP HTTPScope `yaml:"http"`
 }
 
 // Load reads a YAML config from path (pass "" for defaults plus
@@ -228,6 +271,12 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("$RH_SC_READ_ONLY: %w", err)
 		}
 		c.ReadOnly = &b
+	}
+	if v := os.Getenv("RH_SC_MCP_HTTP_ADDR"); v != "" {
+		c.HTTP.Addr = v
+	}
+	if v := os.Getenv("RH_SC_MCP_HTTP_TOKEN"); v != "" {
+		c.HTTP.Token = v
 	}
 
 	c.applyDefaults()
@@ -306,6 +355,68 @@ func (c *Config) validate() error {
 		if _, ok := defaultLevels[r]; !ok {
 			return fmt.Errorf("unknown resource %q in config `resources:` (want %s)",
 				r, joinResources(AllResources))
+		}
+	}
+	return c.validateHTTP()
+}
+
+// OverrideHTTPAddr applies a command-line listen address and re-checks
+// the HTTP invariants.
+//
+// It exists because --http is applied after Load has already run, so the
+// checks inside Load never saw it: a config file with no bearer token is
+// perfectly valid right up until the flag turns the transport on. Rather
+// than repeat the rules at the call site, the flag goes through here and
+// the same validateHTTP decides.
+func (c *Config) OverrideHTTPAddr(addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return nil
+	}
+	c.HTTP.Addr = addr
+	return c.validateHTTP()
+}
+
+// validateHTTP holds every rule that must hold before a port is opened.
+//
+// Both Load and OverrideHTTPAddr call it, so the transport cannot be
+// enabled by a path that skipped a check.
+func (c *Config) validateHTTP() error {
+	c.HTTP.Addr = strings.TrimSpace(c.HTTP.Addr)
+	if !c.HTTP.Enabled() {
+		return nil
+	}
+	if _, _, err := net.SplitHostPort(c.HTTP.Addr); err != nil {
+		return fmt.Errorf(
+			"http.addr %q is not a listen address: use host:port or :port, e.g. :8080 or 127.0.0.1:8080",
+			c.HTTP.Addr)
+	}
+	if strings.TrimSpace(c.HTTP.Token) == "" {
+		return fmt.Errorf(
+			"http.addr is set but no bearer token is configured: set $RH_SC_MCP_HTTP_TOKEN or `http.token:`.\n" +
+				"Over stdio the operating system decides who can reach this server; an open port does not, " +
+				"and this process can read your organisation's support cases.\n" +
+				"Generate one with: openssl rand -hex 32")
+	}
+	// The two credentials must not be the same string. If they were, the
+	// token handed to every MCP client would also be a Red Hat offline
+	// token — usable directly against the support API, outside this
+	// server's scope entirely. Neither value is quoted back: this error
+	// is printed to a terminal and usually lands in a bug report.
+	if c.HTTP.Token == c.OfflineToken {
+		return fmt.Errorf(
+			"http.token is the same string as the Red Hat offline token; they must differ.\n" +
+				"The HTTP token is shared with every MCP client, so reusing the offline token " +
+				"would hand each of them direct access to the support API, bypassing this server's scope.\n" +
+				"Generate a separate one with: openssl rand -hex 32")
+	}
+	if c.HTTP.SessionTimeoutSeconds < 0 {
+		return fmt.Errorf("http.sessionTimeoutSeconds is %d; it must not be negative",
+			c.HTTP.SessionTimeoutSeconds)
+	}
+	for i, o := range c.HTTP.TrustedOrigins {
+		if strings.TrimSpace(o) == "" {
+			return fmt.Errorf("http.trustedOrigins[%d] is empty", i)
 		}
 	}
 	return nil
@@ -412,6 +523,12 @@ func (c *Config) Warnings() []string {
 				"readOnly is off and %s may be written: this server can create cases and post comments that Red Hat and everyone on the account will see, and neither can be withdrawn",
 				strings.Join(writable, ", ")))
 		}
+	}
+	if c.HTTP.Enabled() {
+		w = append(w, fmt.Sprintf(
+			"serving MCP over HTTP on %s: anyone who reaches that port with the bearer token gets everything the scope allows. "+
+				"Terminate TLS in front of it — the token travels in a header on every request",
+			c.HTTP.Addr))
 	}
 	if c.BaseURL != DefaultBaseURL {
 		w = append(w, fmt.Sprintf(

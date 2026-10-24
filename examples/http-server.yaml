@@ -1,0 +1,47 @@
+# HTTP で共有する構成の例。
+#
+# stdio と違い、開いたポートの前には OS のゲートがありません。そのため
+# bearer token が必須で、これを提示できた相手は scope が許す範囲を
+# すべて得ます。TLS は前段で終端してください (token は毎リクエストの
+# ヘッダに乗るため、平文 HTTP は経路上の誰にでも token を渡します)。
+
+# offline token は $RH_SC_OFFLINE_TOKEN から渡します。ここには書きません。
+
+http:
+  addr: ":8080"
+  # 共有 bearer token。$RH_SC_MCP_HTTP_TOKEN を推奨 (secret store から
+  # 渡せるため)。生成: openssl rand -hex 32
+  #
+  # offline token と同じ文字列は使えません (起動時にエラーになります)。
+  # 同値だと、各 MCP クライアントに配った token がそのまま Red Hat の
+  # 認証情報になり、本サーバーの scope を迂回されます。
+  # token: xxxxx
+
+  # 既定 true。複数レプリカを 1 つの Service の背後に sticky routing
+  # なしで置けるようにするため。サーバー発のメッセージが必要な単一
+  # インスタンスでのみ false にします。
+  stateless: true
+
+  # stateful (stateless: false) のときだけ効きます。
+  # sessionTimeoutSeconds: 300
+
+  # cross-origin チェックで追加で許可する Origin。ブラウザは想定
+  # クライアントではないので通常は空です。
+  trustedOrigins: []
+
+# 既定の read-only を維持します。書き込みを許可する場合は readOnly を
+# false にしたうえで、resources で個別に write を与えてください。
+readOnly: true
+
+resources:
+  case:
+    permission: read
+  comment:
+    permission: read
+  # ナレッジベース検索は別の API 面なので明示的に有効化します。
+  # kcs:
+  #   permission: read
+
+maxResults: 50
+maxComments: 50
+timeoutSeconds: 60

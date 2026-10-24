@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rh-sc-mcp
+  labels:
+    app.kubernetes.io/name: rh-sc-mcp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rh-sc-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rh-sc-mcp
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rh-sc-mcp
+          # Example value. No image is published for this project; build
+          # and push to a registry you control before applying.
+          image: ghcr.io/konono/rh-sc-mcp:latest
+          args:
+            - --config
+            - /etc/rh-sc-mcp/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Kept out of the ConfigMap so the scope can be reviewed in
+            # git while the credentials stay in a Secret.
+            - name: RH_SC_OFFLINE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: rh-sc-mcp
+                  key: offlineToken
+            # A different credential from the one above, and the server
+            # refuses to start if they are the same string.
+            - name: RH_SC_MCP_HTTP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: rh-sc-mcp
+                  key: httpToken
+            - name: RH_SC_MCP_HTTP_ADDR
+              value: ":8080"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Unauthenticated on purpose: the kubelet has no bearer token.
+          # They report that this process is up and do not call Red Hat,
+          # so an upstream blip cannot restart the pod.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/rh-sc-mcp
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: rh-sc-mcp

@@ -258,6 +258,172 @@ func TestWarningsCoverTheRiskyCombinations(t *testing.T) {
 	}
 }
 
+// ---- HTTP transport -------------------------------------------------------
+
+func TestHTTPIsOffUnlessAnAddressIsSet(t *testing.T) {
+	withToken(t)
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HTTP.Enabled() {
+		t.Error("the HTTP transport is on without an address")
+	}
+	if len(c.Warnings()) != 0 {
+		t.Errorf("a stdio-only config warned about something: %v", c.Warnings())
+	}
+}
+
+// An open port has no operating-system gate in front of it, so the
+// bearer token is not optional.
+func TestHTTPAddressWithoutATokenIsRejected(t *testing.T) {
+	withToken(t)
+	_, err := Load(write(t, "http:\n  addr: \":8080\"\n"))
+	if err == nil {
+		t.Fatal("an HTTP listener with no bearer token was accepted")
+	}
+	for _, want := range []string{"RH_SC_MCP_HTTP_TOKEN", "openssl rand -hex 32"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not say how to fix it (%q): %v", want, err)
+		}
+	}
+}
+
+// Reusing the offline token would make the string handed to every MCP
+// client a working Red Hat credential, usable outside this server.
+func TestHTTPTokenMustDifferFromTheOfflineToken(t *testing.T) {
+	const shared = "the-very-same-string"
+	t.Setenv("RH_SC_OFFLINE_TOKEN", shared)
+	_, err := Load(write(t, "http:\n  addr: \":8080\"\n  token: "+shared+"\n"))
+	if err == nil {
+		t.Fatal("the offline token was accepted as the shared HTTP token")
+	}
+	if strings.Contains(err.Error(), shared) {
+		t.Errorf("the error quoted the credential: %v", err)
+	}
+	if !strings.Contains(err.Error(), "must differ") {
+		t.Errorf("the error does not explain the rule: %v", err)
+	}
+}
+
+func TestHTTPEnvOverrides(t *testing.T) {
+	withToken(t)
+	t.Setenv("RH_SC_MCP_HTTP_ADDR", "127.0.0.1:9999")
+	t.Setenv("RH_SC_MCP_HTTP_TOKEN", "from-the-environment")
+
+	c, err := Load(write(t, "http:\n  addr: \":1111\"\n  token: from-the-file\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HTTP.Addr != "127.0.0.1:9999" || c.HTTP.Token != "from-the-environment" {
+		t.Fatalf("env did not win: addr=%q", c.HTTP.Addr)
+	}
+}
+
+// --http is applied after Load has run, so the rules have to be checked
+// again or the flag becomes a way around them.
+func TestOverrideHTTPAddrRevalidates(t *testing.T) {
+	t.Run("no token", func(t *testing.T) {
+		withToken(t)
+		c, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.OverrideHTTPAddr(":8080"); err == nil {
+			t.Fatal("--http opened a port with no bearer token configured")
+		}
+	})
+
+	t.Run("token equal to the offline token", func(t *testing.T) {
+		const shared = "identical-credential"
+		t.Setenv("RH_SC_OFFLINE_TOKEN", shared)
+		c, err := Load(write(t, "http:\n  token: "+shared+"\n"))
+		if err != nil {
+			// With no addr the config is inert, so it must load.
+			t.Fatalf("a config with a token but no address should load: %v", err)
+		}
+		if err := c.OverrideHTTPAddr(":8080"); err == nil {
+			t.Fatal("--http enabled a listener whose token is the offline token")
+		}
+	})
+
+	t.Run("malformed address", func(t *testing.T) {
+		withToken(t)
+		c, err := Load(write(t, "http:\n  token: a-separate-token\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.OverrideHTTPAddr("not-an-address"); err == nil {
+			t.Fatal("a listen address without a port was accepted")
+		}
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		withToken(t)
+		c, err := Load(write(t, "http:\n  token: a-separate-token\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.OverrideHTTPAddr(":8080"); err != nil {
+			t.Fatalf("a valid override was rejected: %v", err)
+		}
+		if !c.HTTP.Enabled() || c.HTTP.Addr != ":8080" {
+			t.Errorf("addr = %q", c.HTTP.Addr)
+		}
+	})
+
+	t.Run("empty override leaves the config alone", func(t *testing.T) {
+		withToken(t)
+		c, err := Load(write(t, "http:\n  addr: \":1234\"\n  token: a-separate-token\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.OverrideHTTPAddr(""); err != nil {
+			t.Fatal(err)
+		}
+		if c.HTTP.Addr != ":1234" {
+			t.Errorf("an unset flag changed the address to %q", c.HTTP.Addr)
+		}
+	})
+}
+
+func TestHTTPRejectsBadValues(t *testing.T) {
+	withToken(t)
+	for name, body := range map[string]string{
+		"negative session timeout": "http:\n  addr: \":8080\"\n  token: t0ken-distinct\n  sessionTimeoutSeconds: -1\n",
+		"empty trusted origin":     "http:\n  addr: \":8080\"\n  token: t0ken-distinct\n  trustedOrigins: [\"\"]\n",
+		"address without a port":   "http:\n  addr: \"localhost\"\n  token: t0ken-distinct\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(write(t, body)); err == nil {
+				t.Fatalf("%s was accepted", name)
+			}
+		})
+	}
+}
+
+// Serving on a port is worth saying out loud, since it is the one
+// setting that makes this process reachable by anything but its parent.
+func TestEnablingHTTPProducesAWarning(t *testing.T) {
+	withToken(t)
+	c, err := Load(write(t, "http:\n  addr: \":8080\"\n  token: a-separate-token\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saw bool
+	for _, w := range c.Warnings() {
+		if strings.Contains(w, "HTTP") {
+			saw = true
+		}
+		if strings.Contains(w, "a-separate-token") {
+			t.Errorf("a warning quoted the token: %s", w)
+		}
+	}
+	if !saw {
+		t.Errorf("enabling HTTP produced no warning: %v", c.Warnings())
+	}
+}
+
 func TestParseLevelSpellings(t *testing.T) {
 	for in, want := range map[string]Level{
 		"":           LevelNone,

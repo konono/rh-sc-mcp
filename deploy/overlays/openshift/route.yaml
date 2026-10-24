@@ -1,0 +1,21 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: rh-sc-mcp
+  labels:
+    app.kubernetes.io/name: rh-sc-mcp
+  annotations:
+    # Streamable HTTP keeps a response open while the server streams to
+    # the client. The router's default 30s timeout would cut that short.
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  # Only the MCP endpoint is exposed; the probes stay inside the cluster.
+  path: /mcp
+  to:
+    kind: Service
+    name: rh-sc-mcp
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
