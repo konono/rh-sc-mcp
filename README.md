@@ -910,11 +910,38 @@ main への push
 
 コミットメッセージは [Conventional Commits](https://www.conventionalcommits.org/) が必須です。release-please はこれを読んでバージョンの上げ幅とリリースノートを決めるため、形式から外れたコミットは**変更履歴から黙って消えます**。PR では `commitlint` が検査します。
 
-### 事前に必要な設定
+### 事前に必要なリポジトリ設定
 
-リポジトリの Actions secret に **`RELEASE_PLEASE_TOKEN`** を登録してください。`contents: write` と `pull-requests: write` を持つ PAT (fine-grained なら Contents: Read and write / Pull requests: Read and write) です。
+**Actions secret の登録は不要です。** release-please は組み込みの `GITHUB_TOKEN` で動かします。
 
-既定の `GITHUB_TOKEN` ではなく専用トークンを使うのは、**release-please が作るリリース PR で CI と commitlint を走らせるため**です。`GITHUB_TOKEN` が発生させたイベントは後続のワークフローを起動しないので、そのままではリリース PR だけが未検査になります。なお後続の GoReleaser ジョブは同一ワークフロー実行内の `needs` で繋がっているため、この点とは無関係に動きます。
+専用トークンを使わない判断は、手近なトークンを調べた結果です。この構成を組んだ環境では `gh auth token` が返す値が `gho_` で始まる OAuth トークンで、`repo` / `workflow` / `delete_repo` といったスコープを**そのユーザーが触れる全リポジトリに対して**持っていました。これを public リポジトリの Actions secret に置けば、このリポジトリを 1 つリリースするために必要な権限を大きく超えます。
+
+`gh` は PAT でもログインできるので、手元の `gh auth token` が何を返すかは環境によります (`gh auth status` で確認できます)。ただし、スコープを絞った fine-grained PAT をわざわざ発行・更新し続けるより、下記の設定を 1 つ入れて `GITHUB_TOKEN` で済ませるほうが運用が単純です。
+
+代わりに、**リポジトリ設定を 1 つ変更**してください。
+
+> Settings → Actions → General → Workflow permissions →
+> **Allow GitHub Actions to create and approve pull requests** を有効化
+
+新規の個人リポジトリではこれが既定で無効です (API では `can_approve_pull_request_reviews: false`)。無効のままだと release-please は PR を作れずに失敗します。
+
+**Workflow permissions の既定 (Read repository contents...) は変更不要です。** `release.yml` が job に必要な `contents: write` と `pull-requests: write` を自分で宣言しているためです。リポジトリ全体の既定を read のままにしておけば、他のワークフローが暗黙に書き込み権限を持つことはありません。
+
+```bash
+# 現在の設定を確認する
+gh api repos/<owner>/<repo>/actions/permissions/workflow
+# → {"default_workflow_permissions":"read","can_approve_pull_request_reviews":true}
+```
+
+### リリース PR の CI は手動承認が要ります
+
+`GITHUB_TOKEN` を使うことの代償です。GitHub の [Trigger a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow) にあるとおり、`GITHUB_TOKEN` が起こしたイベントは原則として他のワークフローを起動しません。ただし `pull_request` の `opened` / `synchronize` には例外があり、**実行自体は作られたうえで承認待ち (approval required) の状態で止まります**。
+
+したがって release-please が開いた PR では、CI と commitlint が止まったまま待機します。write 権限を持つ人が PR の Checks 画面で **Approve workflows to run** を押すと動きます。マージ前に必ず押してください — 押さないと、バージョンを変える唯一の PR だけが未検査のままマージされることになります。
+
+なお後続の GoReleaser ジョブはこの影響を受けません。タグ push を契機に新しいワークフローが起動するのではなく、同一ワークフロー実行内で `needs` によって繋がっているためです。
+
+**未確認**: この承認フローは上記 GitHub ドキュメントの記載に基づくもので、本リポジトリで実際のリリース PR を作って確かめてはいません (2026-10-25 時点で Release ワークフローの実行は token 未設定による失敗 1 回のみ)。
 
 ### 配布物
 
