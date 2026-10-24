@@ -167,8 +167,7 @@ offline token が通るかどうかは、セッションを開始せずに確認
   "ssoClientID": "rhsm-api",
   "endpoint": "https://api.access.redhat.com/support/v3",
   "tokenExchange": "ok",
-  "apiProbe": "ok",
-  "casesVisible": 12
+  "apiProbe": "ok"
 }
 ```
 
@@ -177,7 +176,13 @@ offline token が通るかどうかは、セッションを開始せずに確認
 - `tokenExchange` — SSO が offline token を受理したか。失敗した場合、SSO は原因を区別せず `invalid_grant` を返すため、値そのものを確認する必要があります。
 - `apiProbe` — 発行された access token を API が受理したか。SSO は通るのに API が `403` を返すのは、アカウントの可視範囲の問題。
 
-API 側のプローブは `maxResults: 1` の検索 1 回だけです (token が通ることの確認が目的なので、データを引いてくる必要はありません)。`case` が `none` の構成では省略され、その旨が `apiProbe` に入ります。
+API 側のプローブは固定キーワードでの検索 1 回 (`maxResults: 1`) だけです。キーワードが必要なのは、API が**検索条件のないフィルタを拒否する**ためです ([制限事項 6](#6-フィルタ検索は条件なしでは拒否される仕様書に記載なし))。`case` が `none` の構成ではプローブ自体を省略し、その旨が `apiProbe` に入ります。
+
+**この診断出力にケースの情報は入りません。** プローブは最大 1 件しか要求せず、かつ**応答本文を破棄します** — 見ているのはエラーの有無だけです。検索語が何かにマッチしたかどうかに関わらず、ケースのデータが出力に乗ることはありません。
+
+キーワード自体は、マッチする見込みが低くなるよう十分に固有な語を選んでいます (2026-10-25 の実行では 0 件でした)。ただしこれは**その時点のデータについての観測**であって語の性質ではなく、将来ケースにこの文字列が含まれる可能性は排除できません。出力の安全性が依存しているのは上記の「1 件上限 + 応答破棄」のほうです。
+
+ケースの件数も報告しません。特定の検索語での件数は「見えるケース数」を意味しないためです。可視範囲を知りたい場合は `rhcase_search` を使ってください。
 
 失敗時は exit code 1 を返すのでヘルスチェックにも使えます。**出力に認証情報は含まれません** (上流がリクエストヘッダを反射してきた場合も洗浄されます)。
 
@@ -231,7 +236,7 @@ offline token を設定ファイル側 (`offlineToken:`) に書くか、MCP ク�
 | ツール | 必要権限 | 対応 API | 説明 |
 |---|---|---|---|
 | `rhcase_scope` | なし (常時) | — | 有効なエンドポイント・権限・ツール一覧・上限値を返す |
-| `rhcase_search` | `case: read` | `POST /v3/cases/filter` | キーワード・ステータス・severity・製品・担当・アカウント・期間で検索 |
+| `rhcase_search` | `case: read` | `POST /v3/cases/filter` | キーワード・ステータス・severity・製品・担当・アカウント・期間で検索。条件を最低 1 つ要求する |
 | `rhcase_get` | `case: read` | `GET /v3/cases/{caseNumber}` | ケース 1 件の詳細 (description、コメント履歴を含む) |
 | `rhcase_create` | `case: write` | `POST /v3/cases` | ケース新規作成 |
 | `rhcase_update` | `case: write` | `PUT /v3/cases/{caseNumber}` | ケースの部分更新 |
@@ -393,22 +398,30 @@ security: Bearer (apiKey, in: header, name: Authorization)
 
 仕様書には `/v1/cases` 系のパスも存在し、設定で切り替えられるようにしてありますが、本実装が想定・テストしているのは `v3` です。`v1` を指定すると起動時に警告が出ます。
 
-### 5. 実 API に対する動作確認は「認証前まで」しか済んでいない
+### 5. 実 API の確認範囲 — 読み取りは確認済み、書き込みは未確認
 
-自動テストはすべて `httptest` のスタブに対するものです。スタブは公開仕様から起こしたものなので、**仕様と実 API が食い違っている箇所は検出できません**。
+自動テストはすべて `httptest` のスタブに対するものです。スタブは公開仕様から起こしたものなので、**それ自体では仕様と実 API の食い違いを検出できません** (実際に 1 件見つかりました。[制限事項 6](#6-フィルタ検索は条件なしでは拒否される仕様書に記載なし))。
 
-実エンドポイントに対しては、2026-10-24 時点で以下まで確認済みです。
+実エンドポイントに対しては、2026-10-24〜25 に有効な offline token で以下を確認しました。
 
 | 確認したこと | 結果 |
 |---|---|
-| `sso.redhat.com` のトークンエンドポイントの到達性 | GET に `405` が返った (ホストに到達し、応答があった) |
-| `api.access.redhat.com` の到達性 | `/support/v3/cases/{n}` への認証なしリクエストに `401` が返った (ホストに到達し、認証ゲートが応答した) |
+| SSO のトークン交換 | 成功。Bearer token が発行され `expires_in` は `900` |
 | SSO のエラー応答の形 | `{"error":"invalid_grant","error_description":"..."}` + `400`。本実装の `ssoError` と一致 |
-| `--check-auth` の失敗経路 | 無効な値を渡したとき `tokenExchange: failed` / `apiProbe: skipped` / exit 1、認証情報の露出なし |
+| v3 パスのルーティング | `/support/v3/...` が実際に到達する (認証済みリクエストが `200` を返した) |
+| `POST /v3/cases/filter` | `200`。`{totalCount, cases}` の形で、DTO のキーが仕様書と整合 |
+| `GET /v3/cases/{caseNumber}` | `200`。73 キーのオブジェクトが返り、ケース番号が一致 |
+| `GET /v3/cases/{n}/comments` | `200`。配列 (コメントなしのケースでは空配列) |
+| `GET /v3/cases/{n}/comments/{id}` | `200`。id が一致するオブジェクト |
+| MCP 経由の実動作 | Go SDK の `CommandTransport` で実プロセスに接続。`tools/list` は 5 件で write ツールは非表示、`rhcase_search` / `rhcase_get` / `rhcase_list_comments` が成功 |
+| `--check-auth` (成功経路) | 固定キーワードを付けた修正版が exit 0 / `tokenExchange: ok` / `apiProbe: ok` / `error` なし |
+| `--check-auth` (失敗経路) | 受理されない値では exit 1 / `tokenExchange: failed` / `apiProbe: skipped`。いずれの経路でも認証情報の露出なし |
 
-**この `401` はパスの妥当性を示しません。** 認証ゲートがルーティングより前に応答している可能性があるため、確認できたのは「ホストに到達し、認証されていないリクエストが拒否された」ことまでです。`/support` + `/v3/...` というパス構成の根拠は実測ではなく公開仕様書 (`CaseManagement-API_v1.json`) です。
+`GET /v3/cases/{caseNumber}` が返す 73 キーに対し、本実装の `Case` 型は意味のあるフィールドだけを取る射影です ([対象 API](#対象-api) 参照)。未知のキーは無視されるので、仕様書に無いフィールドが増えてもデコードは壊れません。
 
-**未確認のまま残っているのは、有効な offline token を使ったときの認証済み経路です。** 具体的には、`access_token` の発行と `expires_in`、API がその token を受理すること、v3 パスが実際にルーティングされること、`POST /v3/cases/filter` の実レスポンス形状、ケースの取得・作成・更新・コメントの各応答。これらは有効な token が用意でき次第 `--check-auth` と各ツールで確認する必要があります。
+**v3 ケース API のうち未確認なのは書き込み経路です** — `POST /v3/cases` (作成)、`PUT /v3/cases/{n}` (更新)、`POST /v3/cases/{n}/comments` (コメント投稿)。これらは実行するとサポートケースに取り消せない変更が残るため、読み取りの確認とは別に、対象を決めた上で明示的に実施する必要があります。作成・更新・コメントの応答形状に関する本 README の記述は、現時点では**公開仕様書のみを根拠としています**。
+
+v3 ケース API 以外は**いずれも未検証**です。`rhkcs_search` が使う `POST /search/v2/kcs` は一度も実行しておらず ([制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない))、`apiVersion: v1` の経路も同様です ([制限事項 4](#4-apiversion-v1-は未検証))。
 
 #### `invalid_grant` が返るとき
 
@@ -416,7 +429,20 @@ security: Bearer (apiKey, in: header, name: Authorization)
 
 `--check-auth` が `invalid_grant` を返す場合は、[Red Hat 公式の API Tokens ページ](https://access.redhat.com/management/api) で発行した offline token に差し替えたうえで、末尾改行が混入していないかを確認してください。
 
-### 6. severity / status / product の値は検証しない
+### 6. フィルタ検索は条件なしでは拒否される (仕様書に記載なし)
+
+`POST /v3/cases/filter` に `{"maxResults": 1}` だけを送ると、API は `400 No valid external filter criteria provided` を返します。**ページングやソートは検索条件として数えられません。** この挙動は `FilterCasesV3Request` のどこにも書かれておらず、必須フィールドの宣言もありません (2026-10-25 に実 API で確認)。
+
+本実装はこれに 2 つの形で対応しています。
+
+- `rhcase_search` は、条件が 1 つもない呼び出しを**送信前に拒否**し、何を足せばよいかを述べます。API の `400` をそのまま返すと、どの引数が足りないのか分からないためです。
+- `--check-auth` のプローブは固定キーワードを添えます。これが無いと、プローブは実 API に対して**必ず失敗します**。実際、キーワードを付ける前の版は実 API で `400` になり、この乖離はそこで発見されました。キーワードを付けた版は実 token で `apiProbe: ok` になることを確認済みです。
+
+どのフィールドが「条件」として数えられるかは仕様書にも API の応答にも書かれておらず、確認できているのは `keyword` が数えられることだけです。そのため本実装の判定は緩く、「ページング・ソート以外が 1 つでもあれば送る」としています。送った結果 API に拒否される可能性は残り、その場合は API のエラーがそのまま返ります。
+
+なお、この乖離はスタブに対するテストでは発見できませんでした。発見後、スタブ側にも同じ拒否を実装してあるので、プローブから条件を外すと該当テストが落ちます。
+
+### 7. severity / status / product の値は検証しない
 
 仕様書がこれらの列挙値を定義していないため、`"4 (Low)"` のような値をサーバー側で検証することはしていません。誤った値は上流のエラーとして返ります。一方、仕様書が値を明示している項目 (`contentType`、`createdByType`、コメントの `sortField` / `sortOrder`、ケース検索の `sortOrder`) は検証・正規化します。
 
@@ -485,6 +511,8 @@ make test        # go test -race ./...
 - **実際の経路 (SSO 交換 → クライアント → MCP 往復) で、`200` + HTML を返す上流に対し `rhcase_get` / `rhcase_create` / `rhcase_add_comment` がツールエラーになり、access token も offline token もモデル出力に現れないこと**
 - 生成された入力スキーマに必須項目が立っていること、write ツールが `readOnlyHint` を名乗らないこと
 - `--check-auth` が SSO 失敗と API 失敗を区別すること、`case: none` でプローブを省略すること、プローブが 1 件しか要求しないこと、出力に認証情報が現れないこと
+- **条件のないフィルタをスタブが実 API と同じ `400` で拒否すること**、プローブがその拒否を踏まないこと、`rhcase_search` が条件なしの呼び出しを送信前に止めること
+- **プローブがマッチした場合でも、応答本文が診断出力に入らないこと** (スタブは検索語に関わらずケースを返すので、マッチする側を直接検証している)。キーワード自体は形式 (長さ・英数字のみ) のみ検証
 
 ```
 ok  github.com/konono/rh-sc-mcp/internal/config

@@ -300,6 +300,15 @@ func (s *Server) handleSearch(ctx context.Context, in searchArgs) (any, error) {
 	if in.Offset < 0 {
 		return nil, fmt.Errorf("offset %d is not valid: it must not be negative", in.Offset)
 	}
+	// The API refuses a filter that narrows nothing, with a message that
+	// does not say which argument was missing. Catching it here names
+	// the problem instead of passing an opaque 400 to the model.
+	if !req.HasCriteria() {
+		return nil, fmt.Errorf(
+			"no search criteria: pass at least one of keyword, status, severity, product, caseNumbers, " +
+				"accountNumbers, a date range or another filter. maxResults, offset and sorting only shape " +
+				"the results, so the API rejects a request that has nothing else")
+	}
 	req.Offset = in.Offset
 	req.MaxResults = s.cfg.ClampMaxResults(in.MaxResults)
 

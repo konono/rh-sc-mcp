@@ -87,10 +87,25 @@ type AuthCheck struct {
 	Endpoint     string `json:"endpoint"`
 	TokenAcquire string `json:"tokenExchange"`
 	APIProbe     string `json:"apiProbe"`
-	CasesVisible *int   `json:"casesVisible,omitempty"`
 	// Error is the scrubbed failure, when there was one.
 	Error string `json:"error,omitempty"`
 }
+
+// authProbeKeyword is the search term the API probe uses.
+//
+// Some criterion is required, because the service refuses a filter that
+// only says how to page (see FilterCasesRequest.HasCriteria). This term
+// is specific enough that it normally returns no cases: run against the
+// live API on 2026-10-25 it answered 200 with totalCount 0. That is an
+// observation about the data on that day, not a property of the term —
+// nothing stops a future case from containing this string, and what the
+// search costs the service to run was not measured either way.
+//
+// Which is why it is not what keeps case data out of the diagnostic.
+// CheckAuth caps the request at one result and discards the response
+// body entirely, so AuthCheck cannot carry case content whether the term
+// matches or not.
+const authProbeKeyword = "rhscmcpauthprobezzzzzz"
 
 // OK reports whether every step that ran succeeded.
 func (a *AuthCheck) OK() bool { return a.Error == "" }
@@ -121,17 +136,20 @@ func (s *Server) CheckAuth(ctx context.Context) *AuthCheck {
 		out.APIProbe = "skipped: cases are not readable in this configuration"
 		return out
 	}
-	// One case, so the probe costs the API as little as possible and
-	// cannot drag a page of data into a terminal.
-	res, err := s.api.FilterCases(ctx, &redhat.FilterCasesRequest{MaxResults: 1})
-	if err != nil {
+	// The probe asks one question: does the API accept this credential.
+	// So it caps the request at a single result and throws the response
+	// away -- only the error matters. Nothing from the body can reach
+	// AuthCheck, which is what makes this output safe to paste into a
+	// bug report regardless of what the search happened to match.
+	if _, err := s.api.FilterCases(ctx, &redhat.FilterCasesRequest{
+		Keyword:    authProbeKeyword,
+		MaxResults: 1,
+	}); err != nil {
 		out.APIProbe = "failed"
 		out.Error = err.Error()
 		return out
 	}
 	out.APIProbe = "ok"
-	count := res.TotalCount
-	out.CasesVisible = &count
 	return out
 }
 

@@ -53,7 +53,19 @@ func newStubAPI(t *testing.T) *stubAPI {
 		_ = json.NewEncoder(w).Encode(v)
 	}
 
-	mux.HandleFunc("/v3/cases/filter", record(func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/v3/cases/filter", record(func(w http.ResponseWriter, r *http.Request) {
+		// Mirror the real service: a filter that only says how to page
+		// is refused. Found by running against the live API on
+		// 2026-10-25, and not described in the API document -- which is
+		// why it has to be encoded here. A stub that accepts anything
+		// let --check-auth ship with a probe the real API always
+		// rejected.
+		if !bodyHasFilterCriteria(s.bodies[r.Method+" "+r.URL.Path]) {
+			reply(w, 400, map[string]any{
+				"message": "No valid external filter criteria provided",
+			})
+			return
+		}
 		reply(w, 200, map[string]any{
 			"totalCount": 3,
 			"cases": []map[string]any{
@@ -120,6 +132,27 @@ func newStubAPI(t *testing.T) *stubAPI {
 	s.Server = httptest.NewServer(mux)
 	t.Cleanup(s.Close)
 	return s
+}
+
+// pagingOnlyFilterFields are the keys the real service does not count as
+// search criteria: a body containing nothing else is rejected.
+var pagingOnlyFilterFields = map[string]bool{
+	"maxResults": true, "offset": true, "sortField": true, "sortOrder": true,
+}
+
+// bodyHasFilterCriteria reports whether a recorded filter body narrows
+// the search, as opposed to only shaping the results.
+func bodyHasFilterCriteria(body string) bool {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		return false
+	}
+	for k := range m {
+		if !pagingOnlyFilterFields[k] {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *stubAPI) sawPath(p string) bool {
@@ -396,7 +429,9 @@ func TestSearchClampsMaxResults(t *testing.T) {
 	cs := connect(t, testServer(t, api, func(c *config.Config) { c.MaxResults = 5 }))
 
 	var got searchResult
-	decodeResult(t, call(t, cs, "rhcase_search", map[string]any{"maxResults": 500}), &got)
+	decodeResult(t, call(t, cs, "rhcase_search", map[string]any{
+		"keyword": "disk", "maxResults": 500,
+	}), &got)
 
 	if !strings.Contains(api.bodies["POST /v3/cases/filter"], `"maxResults":5`) {
 		t.Fatalf("maxResults was not clamped in the request: %s", api.bodies["POST /v3/cases/filter"])
@@ -908,13 +943,114 @@ func TestCheckAuthSucceedsAgainstAWorkingEndpoint(t *testing.T) {
 	if got.TokenAcquire != "ok" || got.APIProbe != "ok" {
 		t.Fatalf("tokenExchange=%q apiProbe=%q", got.TokenAcquire, got.APIProbe)
 	}
-	if got.CasesVisible == nil || *got.CasesVisible != 3 {
-		t.Errorf("casesVisible = %v, want the stub's totalCount of 3", got.CasesVisible)
-	}
 	// The probe must stay small; it exists to prove the token works,
 	// not to fetch anything.
-	if !strings.Contains(api.bodies["POST /v3/cases/filter"], `"maxResults":1`) {
-		t.Errorf("the probe asked for more than one case: %s", api.bodies["POST /v3/cases/filter"])
+	body := api.bodies["POST /v3/cases/filter"]
+	if !strings.Contains(body, `"maxResults":1`) {
+		t.Errorf("the probe asked for more than one case: %s", body)
+	}
+	// And it must narrow the search, or the real service refuses it.
+	if !bodyHasFilterCriteria(body) {
+		t.Errorf("the probe sent no filter criteria, which the real API rejects: %s", body)
+	}
+}
+
+// The probe's search term has to be well formed: long enough to be
+// specific, and plain enough to survive being used as a search term.
+//
+// This asserts the shape only. Whether the term matches anything is a
+// fact about the data on a given day, not something a test can pin --
+// and it is not what keeps case content out of the diagnostic either.
+// That is CheckAuth capping the request at one result and discarding
+// the response, which TestCheckAuthOutputCarriesNoCredential and the
+// probe's own assertions cover.
+func TestAuthProbeKeywordIsWellFormed(t *testing.T) {
+	if len(authProbeKeyword) < 16 {
+		t.Fatalf("probe keyword %q is too short to be a specific search term", authProbeKeyword)
+	}
+	for _, r := range authProbeKeyword {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			t.Fatalf("probe keyword %q contains %q; the keyword becomes a SOSL FIND term, "+
+				"so it must stay plain alphanumeric", authProbeKeyword, r)
+		}
+	}
+}
+
+// What actually keeps case content out of the diagnostic: the response
+// is discarded. The stub answers the probe with cases regardless of the
+// search term, so this exercises the matching case directly rather than
+// relying on the term finding nothing.
+func TestCheckAuthDiscardsCaseDataEvenWhenTheProbeMatches(t *testing.T) {
+	api := newStubAPI(t)
+	got := testServer(t, api, nil).CheckAuth(context.Background())
+
+	if !got.OK() {
+		t.Fatalf("check failed: %+v", got)
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Everything the stub would have returned for this probe.
+	for _, leaked := range []string{
+		"kernel panic", "04337263", "04337264", "Waiting on Red Hat",
+		"a very long description", "slow I/O",
+	} {
+		if strings.Contains(string(b), leaked) {
+			t.Errorf("case data reached the diagnostic output (%q): %s", leaked, b)
+		}
+	}
+}
+
+// The real service refuses a filter that only says how to page, with a
+// message that does not name the missing argument. This is pinned
+// because --check-auth shipped with exactly that body and the stub,
+// being more permissive than the service, accepted it.
+func TestFilterWithoutCriteriaIsRejectedTheWayTheRealAPIRejectsIt(t *testing.T) {
+	api := newStubAPI(t)
+	srv := testServer(t, api, nil)
+
+	// Straight at the client, bypassing the tool-level guard, to show
+	// what the body the probe used to send actually gets back.
+	_, err := srv.api.FilterCases(context.Background(), &redhat.FilterCasesRequest{MaxResults: 1})
+	if err == nil {
+		t.Fatal("a criteria-less filter was accepted; the stub no longer matches the real service")
+	}
+	if !strings.Contains(err.Error(), "No valid external filter criteria") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// And the request the probe really sends is accepted.
+	if _, err := srv.api.FilterCases(context.Background(), &redhat.FilterCasesRequest{
+		Keyword: authProbeKeyword, MaxResults: 1,
+	}); err != nil {
+		t.Fatalf("the probe's own request was rejected: %v", err)
+	}
+}
+
+// A search with nothing to search on is refused before it is sent, with
+// a message that says what to add -- rather than passing the service's
+// opaque 400 back to the model.
+func TestSearchWithoutCriteriaIsRefusedLocally(t *testing.T) {
+	api := newStubAPI(t)
+	cs := connect(t, testServer(t, api, nil))
+
+	for _, args := range []map[string]any{
+		{},
+		{"maxResults": 10},
+		{"offset": 20, "sortOrder": "ASC", "sortField": "CreatedDate"},
+	} {
+		res := call(t, cs, "rhcase_search", args)
+		if !res.IsError {
+			t.Errorf("a criteria-less search was accepted: %v", args)
+			continue
+		}
+		if !strings.Contains(resultText(t, res), "keyword") {
+			t.Errorf("the error does not say what to add: %s", resultText(t, res))
+		}
+	}
+	if api.sawPath("/v3/cases/filter") {
+		t.Error("a criteria-less search still reached the API")
 	}
 }
 

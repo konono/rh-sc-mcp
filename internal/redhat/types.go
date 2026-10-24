@@ -203,6 +203,41 @@ type FilterCasesRequest struct {
 	SortOrder  string `json:"sortOrder,omitempty"`
 }
 
+// HasCriteria reports whether the request narrows the search at all,
+// rather than only saying how to page and sort it.
+//
+// The API rejects a criteria-less filter with
+// `400 No valid external filter criteria provided`, which the document
+// does not mention; this was found by running against the real service
+// on 2026-10-25. Paging and sorting do not count as criteria there —
+// a body of {"maxResults":1} is refused.
+//
+// Which fields the service counts is not documented and only `keyword`
+// has been confirmed. So this is deliberately generous: everything that
+// is not paging or sorting counts, and a request that passes here can
+// still be refused upstream. The point is to catch the empty search,
+// not to predict the service's exact rule.
+func (f *FilterCasesRequest) HasCriteria() bool {
+	switch {
+	case f.Keyword != "", f.Status != "", f.Severity != "", f.Product != "",
+		f.Version != "", f.Type != "":
+		return true
+	case len(f.Statuses) > 0, len(f.Severities) > 0, len(f.Products) > 0:
+		return true
+	case len(f.CaseNumbers) > 0, len(f.AccountNumbers) > 0, len(f.GroupNumbers) > 0:
+		return true
+	case f.SBRGroups != "", f.Tags != "", f.CaseLanguage != "":
+		return true
+	case f.CreatedBySSOName != "", f.OwnerSSOName != "":
+		return true
+	case f.StartDate != "", f.EndDate != "", f.LastModifiedFrom != "", f.LastModifiedTo != "":
+		return true
+	case f.IncludeClosed != nil, f.OnlyEscalated != nil, f.CustomerEscalated != nil:
+		return true
+	}
+	return false
+}
+
 // FilterCasesResponse mirrors FilterCasesV3Response.
 type FilterCasesResponse struct {
 	TotalCount int    `json:"totalCount"`
