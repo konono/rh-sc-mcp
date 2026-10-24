@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # No windows runner: the server has never been run there, and a
+        # green check would read as support it does not have.
+        go-version: ['1.25', '1.26']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+      - run: go vet ./...
+      # -race because the token source is shared across concurrent tool
+      # calls, and a data race there would be on a credential.
+      - run: go test -race -coverprofile=coverage.out ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          # 2.12.0 and later embed the config JSONSchema in the binary.
+          # Earlier versions fetch it from golangci-lint.run on every run,
+          # so a timeout there fails the job with nothing to say about
+          # this code. Keep this at 2.12.0 or later.
+          version: v2.12.2

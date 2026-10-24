@@ -24,6 +24,7 @@ Red Hat サポートケース管理 API を MCP (Model Context Protocol) ツー�
 - [制限事項と未確認事項](#制限事項と未確認事項)
 - [旧参照実装 (hydra-mcp-server) との差分](#旧参照実装-hydra-mcp-server-との差分)
 - [テスト](#テスト)
+- [リリース](#リリース)
 - [ライセンス](#ライセンス)
 
 ---
@@ -60,6 +61,7 @@ make install
 make test
 make fmt
 make vet
+make lint    # golangci-lint (.golangci.yml)
 ```
 
 バージョン確認:
@@ -890,6 +892,52 @@ ok  github.com/konono/rh-sc-mcp/internal/server
 
 ---
 
+## リリース
+
+リリースは **release-please + GoReleaser** で自動化しています ([konono/aw](https://github.com/konono/aw) と同じ構成)。
+
+```
+main への push
+  └─ release-please: conventional commits を読み、リリース PR を更新
+       └─ その PR をマージ
+            ├─ タグ・GitHub Release・CHANGELOG を作成
+            └─ GoReleaser: バイナリを Release に添付
+```
+
+現在のバージョンは 2 箇所にあります — `.release-please-manifest.json` と `internal/version/version.go` です。前者が release-please にとっての記録で、後者は `release-please-config.json` の `extra-files` に登録された派生先です。リリースのたびに release-please が**両方をまとめて更新**するので、手で書き換える必要はありません。
+
+`version.go` 側の目印は定数を囲む `x-release-please-start-version` / `x-release-please-end` のコメントです。release-please はこの範囲を探して置換するため、**マーカーを消したり定数から引き離したりすると置換対象を見失います**。そうなったときに何が起きるか (エラーで止まるのか、`version.go` だけ古いまま進むのか) は確認していないので、**マーカーは動かさない**のが無難です。
+
+コミットメッセージは [Conventional Commits](https://www.conventionalcommits.org/) が必須です。release-please はこれを読んでバージョンの上げ幅とリリースノートを決めるため、形式から外れたコミットは**変更履歴から黙って消えます**。PR では `commitlint` が検査します。
+
+### 事前に必要な設定
+
+リポジトリの Actions secret に **`RELEASE_PLEASE_TOKEN`** を登録してください。`contents: write` と `pull-requests: write` を持つ PAT (fine-grained なら Contents: Read and write / Pull requests: Read and write) です。
+
+既定の `GITHUB_TOKEN` ではなく専用トークンを使うのは、**release-please が作るリリース PR で CI と commitlint を走らせるため**です。`GITHUB_TOKEN` が発生させたイベントは後続のワークフローを起動しないので、そのままではリリース PR だけが未検査になります。なお後続の GoReleaser ジョブは同一ワークフロー実行内の `needs` で繋がっているため、この点とは無関係に動きます。
+
+### 配布物
+
+| 対象 | 配布 |
+|---|---|
+| linux / darwin × amd64 / arm64 | `rh-sc-mcp_<os>_<arch>.tar.gz` を Release に添付 |
+| windows | **配布しません** |
+| コンテナイメージ | **配布しません** ([制限事項 7](#7-コンテナイメージの-build-は未検証)) |
+
+Windows を外しているのは、このサーバーを Windows で動かしたことが一度も無いためです。バイナリを配ると「動くはず」という暗黙の主張になります。Windows で使う場合はソースからビルドしてください。
+
+macOS 向けバイナリについては、**ローカルで `go build` したものは本開発環境 (darwin/arm64) で stdio・HTTP とも動作確認済み**ですが、**GoReleaser が CI で生成する配布用 darwin バイナリは未検証**です。署名も notarization も行っていないため、ダウンロードしたバイナリは Gatekeeper に止められる可能性があります。
+
+### インストールスクリプト
+
+`install.sh` は最新 Release からバイナリを取得します。**初回 Release を公開するまでは動作しません** (Release API が 404 を返し、ソースからのビルド手順を案内して終了します)。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | bash
+```
+
+---
+
 ## ライセンス
 
-未定 (リポジトリ所有者が決定)。
+[MIT License](LICENSE) — Copyright (c) 2026 konono

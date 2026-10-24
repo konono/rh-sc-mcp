@@ -1,0 +1,16 @@
+name: Commitlint
+
+# release-please derives the version bump and the release notes from the
+# commit subjects, so a commit that is not conventional is a commit that
+# silently goes missing from the changelog.
+on:
+  pull_request:
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6

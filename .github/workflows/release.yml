@@ -1,0 +1,53 @@
+name: Release
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # release-please reads the conventional commits since the last tag,
+  # keeps a release PR up to date, and on merge creates the tag, the
+  # GitHub release and the CHANGELOG entry.
+  #
+  # It runs with a dedicated token rather than GITHUB_TOKEN so that the
+  # release PR it opens runs CI and commitlint like any other PR: events
+  # raised by GITHUB_TOKEN do not start further workflows, which would
+  # leave that PR unchecked. The goreleaser job below is unaffected
+  # either way -- it is in this same run, reached through `needs`, not
+  # by a workflow triggered from the new tag.
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+  # Attaches binaries to the release release-please just made. The
+  # goreleaser config uses `release: mode: keep-existing` so the notes
+  # written from the commits are left alone.
+  goreleaser:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

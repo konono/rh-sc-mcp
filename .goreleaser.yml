@@ -1,0 +1,36 @@
+version: 2
+
+# release-please has already created the GitHub release and its notes by
+# the time this runs, so attach the binaries rather than recreating it.
+release:
+  mode: keep-existing
+
+builds:
+  - binary: rh-sc-mcp
+    main: ./cmd/rh-sc-mcp
+    env:
+      - CGO_ENABLED=0
+    # No windows target. The server has never been run there, and
+    # shipping a binary is an implicit claim that it works.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  # `formats` rather than the singular `format`, which goreleaser v2
+  # deprecated.
+  - formats: [tar.gz]
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+# release-please writes the release notes from the conventional commits,
+# so goreleaser must not write its own over them.
+changelog:
+  disable: true

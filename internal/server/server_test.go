@@ -1012,7 +1012,9 @@ func TestAuthProbeKeywordIsWellFormed(t *testing.T) {
 		t.Fatalf("probe keyword %q is too short to be a specific search term", authProbeKeyword)
 	}
 	for _, r := range authProbeKeyword {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+		lower := r >= 'a' && r <= 'z'
+		digit := r >= '0' && r <= '9'
+		if !lower && !digit {
 			t.Fatalf("probe keyword %q contains %q; the keyword becomes a SOSL FIND term, "+
 				"so it must stay plain alphanumeric", authProbeKeyword, r)
 		}

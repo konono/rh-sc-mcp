@@ -174,7 +174,3 @@ func clipArg(s string) string {
 	}
 	return s[:n] + "…"
 }
-
-// ptr is the one-liner that turns a value into the pointer the partial
-// update request needs.
-func ptr[T any](v T) *T { return &v }
