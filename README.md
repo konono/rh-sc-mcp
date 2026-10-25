@@ -102,7 +102,7 @@ rh-sc-mcp update
 rh-sc-mcp --version
 ```
 
-`update` は `go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest` を実行します。インストールと更新を同じ経路に揃えるためです。Go の既定設定であれば、ダウンロードしたモジュールはチェックサムデータベース (`sum.golang.org`) に照合されます。ただしこれは**利用者側の設定に依存します** — `GOSUMDB=off` や、このモジュールに一致する `GOPRIVATE` / `GONOSUMDB` / `GONOSUMCHECK` が設定されていれば照合は行われません。環境の設定は `go env GOSUMDB GOPRIVATE GOFLAGS` で確認できます。Red Hat の認証情報や設定ファイルは不要です。更新後は Claude Code などの MCP クライアントを再起動してください。
+`update` は `go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest` を実行します。インストールと更新を同じ経路に揃えるためです。Go の既定設定であれば、ダウンロードしたモジュールはチェックサムデータベース (`sum.golang.org`) に照合されます。ただしこれは**利用者側の設定に依存します** — `GOSUMDB=off` や、このモジュールのパスに一致する glob が `GOPRIVATE` / `GONOSUMDB` に設定されていれば照合は行われません。環境の設定は `go env GOSUMDB GOPRIVATE GONOSUMDB` で確認できます。Red Hat の認証情報や設定ファイルは不要です。更新後は Claude Code などの MCP クライアントを再起動してください。
 
 **実行前に、`go install` の書き込み先と現在動いているバイナリが同じかを確認します。** `go install` は起動元に関係なく `GOBIN` / `GOPATH` 先頭の `bin/` へ書くので、別の場所にコピーしたバイナリから実行すると「更新成功」と出たのに動かしているファイルは古いまま、という状態になり得ます。一致しない場合は**何もインストールせずに停止し**、両方のパスと手動手順を表示します。
 
