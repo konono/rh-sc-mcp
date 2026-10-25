@@ -8,8 +8,11 @@ spec:
       securityContext:
         # OpenShift's restricted-v2 SCC assigns a UID from the
         # namespace's range and rejects a pod that pins one. Dropping
-        # runAsUser lets it choose; the image writes no files, so any
-        # UID works.
+        # runAsUser lets it choose. Nothing here depends on the uid
+        # because the base deployment passes --config, so the process
+        # reads the mounted configuration and writes nothing. Checked
+        # with one arbitrarily chosen uid, 1000650000, on a read-only
+        # root filesystem.
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault

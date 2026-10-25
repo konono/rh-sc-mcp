@@ -17,9 +17,13 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 # OpenShift assigns an arbitrary UID from the namespace range and ignores
 # the image's USER, so nothing may depend on a particular uid. The binary
-# is world-readable and the process writes no files, which is what makes
-# that safe here. runAsNonRoot in the manifests needs a numeric USER to
-# check against, hence the uid rather than a name.
+# is world-readable, and with the CMD below the process only reads the
+# config it is given — it writes nothing — which is what is meant to make
+# an unassigned uid safe. Checked once, with uid 1000650000; that is one
+# sample, not a sweep. Drop the --config and it will try to create a
+# default under $HOME, which an assigned uid does not own. runAsNonRoot
+# in the manifests needs a numeric USER to check against, hence the uid
+# rather than a name.
 USER 65532:65532
 
 COPY --from=build /out/rh-sc-mcp /usr/local/bin/rh-sc-mcp

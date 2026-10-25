@@ -601,7 +601,9 @@ kubectl apply -k deploy/overlays/kubernetes
 
 マニフェストは、コンテナを非 root・read-only root filesystem・全 capability drop・`RuntimeDefault` seccomp で動かす設定にしています。イメージは `USER 65532:65532` を宣言しています (マニフェストの `runAsNonRoot` が数値の UID を必要とするため)。一方 OpenShift の `restricted-v2` SCC は namespace のレンジから任意の UID を割り当て、イメージの `USER` を無視します。
 
-**任意の UID でも動くよう、ファイルの書き込みと特定 UID への依存を避けた設計です** — プロセスはファイルを書かず、バイナリは誰でも読める配置に置いています。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。**ただしコンテナ実行自体は未検証です** ([制限事項 7](#7-コンテナイメージの-build-は未検証))。これは設計上の意図であって、動作を確認した結果ではありません。
+**割り当てられた UID に依存しないよう、特定 UID やファイル所有権への依存を避けてあります** — バイナリは誰でも読める配置に置いてあり、**この構成ではマウントした設定を `--config` で読むだけで、起動時にファイルを書きません**。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。これは設計意図にとどまらず、**任意に選んだ UID 1000650000 で、read-only root filesystem + 全 capability drop のもと実際に動くことを Podman で確認済み**です ([制限事項 7](#7-コンテナは-podman-で検証済み-docker-自体では未実行))。確認したのはこの 1 つの UID で、全 UID を試したわけではありません。
+
+書き込みが起きないのは `--config` を渡しているからです。これを省くと既定の設定ファイルを作ろうとして `$HOME` に書き込みます。マニフェストは `args` で常に渡すので該当しませんが、`CMD` を置き換える場合は[制限事項 7](#7-コンテナは-podman-で検証済み-docker-自体では未実行) を参照してください。
 
 OpenShift overlay の `Route` には 300 秒の HAProxy タイムアウトを付けています。streamed な MCP 応答は開いたままになるため、ルーターの既定 30 秒では切られます。Kubernetes overlay は代わりに `Ingress` を置きます。どちらも公開するのは `/mcp` だけで、プローブはクラスタ内に留めます。
 
@@ -833,9 +835,27 @@ spellcheck:     {}
 - 未設定時: ツール出力に `caseUrl` は現れません。代わりに API 自身が返した `uri` (ケース) と `location` (作成時) が入ります。
 - 設定時 (`caseViewURL`): ケース番号を最後のパスセグメントとして連結した URL を `caseUrl` として返します。この値の正しさは設定した operator の責任です。
 
-### 4. `apiVersion: v1` は未検証
+### 4. `apiVersion: v1` では同じケースを取得できませんでした
 
 仕様書には `/v1/cases` 系のパスも存在し、設定で切り替えられるようにしてありますが、本実装が想定・テストしているのは `v3` です。`v1` を指定すると起動時に警告が出ます。
+
+2026-10-26 に read 経路だけを実測した結果は次のとおりです (この環境の資格情報での 1 回限りの観測です)。
+
+| 呼び出し | 結果 |
+|---|---|
+| `POST /v1/cases/filter` (`keyword` が短い) | `400`。`{message, detailMessage}` で「Search string too short」。**v3 は同じ語を 200 で受理**します |
+| `POST /v1/cases/filter` (通常の語) | `200`。ただし `totalCount: 0` のみで `cases` キー自体がない |
+| `POST /v1/cases/filter` (`caseNumbers` に既知の番号) | `200` / `totalCount: 0` / 0 件。**同じ条件で v3 は `totalCount: 1` / 1 件** |
+| `GET /v1/cases/{caseNumber}` (v3 が 200 を返す番号) | `404`「Unable to find case by number」 |
+| `GET /v1/cases/{n}/comments` (同上) | `404` |
+
+**この資格情報では、v3 で取得できるケースを v1 からは取得できませんでした。** 同一トークン・同一ケース番号で v3 側は `200` (ケース本体 73 キー、comments は配列) を返します。
+
+**理由は確定していません。** v1 のデータ範囲が異なる、このアカウントに v1 の権限がない、当該パスが実質的に非対応になっている、などが考えられますが、応答からは区別できません。「v1 の read 経路が壊れている」と一般化できる材料もありません。
+
+エラー応答は `message` と `detailMessage` の 2 キーで、本実装の `LegacyApiErrorResponse` の部分集合なのでデコードできます。`200` の filter 応答も `cases` が無いだけで `FilterCasesResponse` としてデコードでき、0 件として扱われます。一方、**v1 の成功時のケース本体は取得できていないため、`Case` 型でデコードできるかは未確認**です。
+
+実運用では `v3` (既定) を使ってください。
 
 ### 5. 実 API の確認範囲 — 読み取りは確認済み、書き込みは未確認
 
@@ -861,7 +881,7 @@ spellcheck:     {}
 
 **v3 ケース API のうち未確認なのは書き込み経路です** — `POST /v3/cases` (作成)、`PUT /v3/cases/{n}` (更新)、`POST /v3/cases/{n}/comments` (コメント投稿)。これらは実行するとサポートケースに取り消せない変更が残るため、読み取りの確認とは別に、対象を決めた上で明示的に実施する必要があります。作成・更新・コメントの応答形状に関する本 README の記述は、現時点では**公開仕様書のみを根拠としています**。
 
-`POST /search/v2/kcs` は読み取りで確認済みです (上表、および[制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない))。ただし確認したのは `rows` を絞った一般的な検索語での 1 系統だけで、`expression` に凝った Solr 式を渡した場合の挙動や、返りうるフィールドの全体像は把握していません。`apiVersion: v1` の経路は**未検証のまま**です ([制限事項 4](#4-apiversion-v1-は未検証))。
+`POST /search/v2/kcs` は読み取りで確認済みです (上表、および[制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない))。ただし確認したのは `rows` を絞った一般的な検索語での 1 系統だけで、`expression` に凝った Solr 式を渡した場合の挙動や、返りうるフィールドの全体像は把握していません。`apiVersion: v1` の read 経路も実測しましたが、この資格情報では v3 で取得できるケースを取得できませんでした ([制限事項 4](#4-apiversion-v1-では同じケースを取得できませんでした))。
 
 #### `invalid_grant` が返るとき
 
@@ -882,9 +902,27 @@ spellcheck:     {}
 
 なお、この乖離はスタブに対するテストでは発見できませんでした。発見後、スタブ側にも同じ拒否を実装してあるので、プローブから条件を外すと該当テストが落ちます。
 
-### 7. コンテナイメージの build は未検証
+### 7. コンテナは Podman で検証済み (Docker 自体では未実行)
 
-`Dockerfile` は参照実装に合わせて用意しましたが、**この環境に Docker CLI が無いため build を実行していません**。確認したのは、同じビルド構成 (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64` でのクロスコンパイル) が通ることと、`deploy/` の両オーバーレイが `kubectl kustomize` でレンダリングできることまでです。コンテナ内での実行、`distroless` ベースとの組み合わせ、`USER 65532` での動作は未確認です。
+2026-10-26 に Podman 5.7.1 で build と実行を確認しました。`Dockerfile` は `docker build` 互換の記法ですが、**Docker CLI そのものでは実行していません**。
+
+**マニフェスト相当の構成で動きます。** `deploy/base/deployment.yaml` と同じ条件 — read-only root filesystem、全 capability drop、`runAsUser` を固定せず任意に選んだ UID を与える、ConfigMap 相当を `/etc/rh-sc-mcp/config.yaml` にマウントし `--config` で渡す — で次を確認しました。
+
+| 確認項目 | 結果 |
+|---|---|
+| `podman build` | 成功。distroless ベース (`/bin/sh` 不在)、`USER 65532:65532`、約 11.8 MB |
+| 任意に選んだ UID (`--user 1000650000`) + `--read-only` + `--cap-drop=ALL` | 起動する |
+| `--print-scope` | 正常に出力 |
+| `/healthz` / `/readyz` | どちらも `200` |
+| `/mcp` (token なし / あり) | `401` / JSON-RPC の result |
+| コンテナ内の stdio `initialize` | JSON-RPC の result |
+| 起動ログ | HTTP 有効化の警告が出る。token の出力なし |
+
+これで[コンテナと Kubernetes / OpenShift](#コンテナと-kubernetes--openshift) に書いた「割り当てられた UID に依存しない」という記述は、設計意図だけでなく 1 件の実測に裏付けられたことになります。**検証したのは UID 1000650000 の 1 値だけ**で、OpenShift が割り当てうる範囲を網羅したわけではありません。
+
+**制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
+
+なお、イメージは公開していません ([配布物](#配布物) 参照)。
 
 ### 8. severity / status / product の値は検証しない
 
@@ -1044,7 +1082,7 @@ gh api repos/<owner>/<repo>/actions/permissions/workflow
 |---|---|
 | linux / darwin × amd64 / arm64 | `rh-sc-mcp_<os>_<arch>.tar.gz` を Release に添付 |
 | windows | **配布しません** |
-| コンテナイメージ | **配布しません** ([制限事項 7](#7-コンテナイメージの-build-は未検証)) |
+| コンテナイメージ | **配布しません** ([制限事項 7](#7-コンテナは-podman-で検証済み-docker-自体では未実行)) |
 
 Windows を外しているのは、このサーバーを Windows で動かしたことが一度も無いためです。バイナリを配ると「動くはず」という暗黙の主張になります。Windows で使う場合はソースからビルドしてください。
 
