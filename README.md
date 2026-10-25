@@ -74,16 +74,19 @@ make lint    # golangci-lint (.golangci.yml)
 
 ## 設定
 
-設定は YAML ファイルと環境変数で行います。両方指定した場合は **環境変数が優先** します。
+設定は YAML ファイルと環境変数で行います。設定ファイルの既定パスは `~/.config/rh-sc-mcp/config.yaml` です。`--config`、`RH_SC_MCP_CONFIG`、既定パスの順にファイルを選びます。設定ファイルと環境変数はキー単位でマージし、**両方にあるキーは環境変数が優先**、ファイルにしかないキーはそのまま使います。
+
+`--config` と `RH_SC_MCP_CONFIG` を指定せずに初めて起動すると、既定パスのディレクトリ (権限 `0700`) と最小構成の設定ファイル (権限 `0600`) を作ります。既存ファイルは上書きしません。生成内容は `readOnly: true` と説明コメントだけで、認証情報は含みません。offline token が未設定なら、ファイルを作った後に起動はエラーで止まります。
 
 ```bash
-cp config.example.yaml config.yaml
-$EDITOR config.yaml
+# 初回は設定ファイルを生成。token 未設定なら案内を表示して終了
+rh-sc-mcp --print-scope
+$EDITOR "$HOME/.config/rh-sc-mcp/config.yaml"
 ```
 
-`config.example.yaml` に全キーの説明があります。**必須なのは offline token だけ** で、それ以外のキーはすべて省略可能です (省略時は既定値)。offline token も環境変数 `$RH_SC_OFFLINE_TOKEN` で渡すなら設定ファイルに書く必要はなく、その場合は設定ファイルそのものを省略できます。どちらにも無い場合は起動時にエラーになります。
+`config.example.yaml` に全キーの説明があります。**必須なのは offline token だけ** で、それ以外のキーはすべて省略可能です (省略時は既定値)。offline token は生成したファイルに `offlineToken:` として追加するか、環境変数 `$RH_SC_OFFLINE_TOKEN` で渡します。後者なら認証情報をファイルに保存せずに済みます。明示した `--config` または `RH_SC_MCP_CONFIG` のファイルが無い場合はエラーになり、既定ファイルは作りません。
 
-最小構成 (環境変数だけ、設定ファイルなし) では、公開エンドポイントに対する read-only サーバーになります。
+最小構成 (環境変数で token を渡し、生成した設定ファイルを使う) では、公開エンドポイントに対する read-only サーバーになります。
 
 ```bash
 RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
@@ -121,7 +124,7 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 | `RH_SC_SSO_TOKEN_URL` | `ssoTokenURL` |
 | `RH_SC_SSO_CLIENT_ID` | `ssoClientID` |
 | `RH_SC_READ_ONLY` | `readOnly` (`true`/`false`) |
-| `RH_SC_MCP_CONFIG` | `--config` のパス |
+| `RH_SC_MCP_CONFIG` | 設定ファイルのパス (`--config` が優先。未指定なら `~/.config/rh-sc-mcp/config.yaml`) |
 | `RH_SC_MCP_HTTP_ADDR` | `http.addr` |
 | `RH_SC_MCP_HTTP_TOKEN` | `http.token` |
 
@@ -146,7 +149,7 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 実際に何が有効になっているかは、起動せずに確認できます。
 
 ```bash
-./bin/rh-sc-mcp --config config.yaml --print-scope
+./bin/rh-sc-mcp --print-scope
 ```
 
 ```json
@@ -172,7 +175,7 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 offline token が通るかどうかは、セッションを開始せずに確認できます。
 
 ```bash
-./bin/rh-sc-mcp --config config.yaml --check-auth
+./bin/rh-sc-mcp --check-auth
 ```
 
 ```json
@@ -228,8 +231,10 @@ HTTP の場合、クライアントが持つのは共有 bearer token だけで�
 
 #### Claude Code
 
+既定パスに設定した場合、`--config` は不要です。
+
 ```bash
-claude mcp add rh-sc -- /path/to/rh-sc-mcp --config /path/to/config.yaml
+claude mcp add rh-sc -- /path/to/rh-sc-mcp
 ```
 
 #### 設定ファイルで直接書く場合
@@ -239,7 +244,7 @@ claude mcp add rh-sc -- /path/to/rh-sc-mcp --config /path/to/config.yaml
   "mcpServers": {
     "rh-sc": {
       "command": "/path/to/rh-sc-mcp",
-      "args": ["--config", "/path/to/config.yaml"],
+      "args": [],
       "env": {
         "RH_SC_OFFLINE_TOKEN": "..."
       }
@@ -249,6 +254,8 @@ claude mcp add rh-sc -- /path/to/rh-sc-mcp --config /path/to/config.yaml
 ```
 
 offline token を設定ファイル側 (`offlineToken:`) に書くか、MCP クライアントの `env` で渡すかは運用次第です。`env` に書くとそのクライアントの設定ファイルにも秘密が広がる点に注意してください (エージェントが読める場所であることが多い)。
+
+別の場所に設定ファイルを置く場合は `--config /path/to/config.yaml` を追加します。
 
 ログは **stderr** に出ます。stdout は MCP のトランスポートなので、プロトコルフレーム以外は一切流しません。
 
@@ -347,7 +354,7 @@ claude mcp add --transport http rh-sc-http https://mcp.example.com/mcp \
 
 ```bash
 export RH_SC_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
-rh-sc-mcp --config config.yaml --http :8080
+rh-sc-mcp --http :8080
 ```
 
 [streamable]: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
@@ -409,7 +416,7 @@ HTTP でも stdio とまったく同じ scope が適用されます。read-only 
 `--print-scope` には HTTP の設定も出ますが、**token は値も長さも接頭辞も出しません**。`tokenConfigured: true/false` だけです。
 
 ```bash
-rh-sc-mcp --config config.yaml --print-scope | jq .http
+rh-sc-mcp --print-scope | jq .http
 ```
 
 ```json

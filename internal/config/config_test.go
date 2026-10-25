@@ -24,6 +24,90 @@ func withToken(t *testing.T) {
 	t.Setenv("RH_SC_OFFLINE_TOKEN", "offline-token-for-tests")
 }
 
+func TestResolvePathCreatesPrivateDefaultWithoutOverwritingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	defaultPath := filepath.Join(home, ".config", "rh-sc-mcp", "config.yaml")
+	explicit := filepath.Join(home, "other.yaml")
+	got, err := ResolvePath(explicit)
+	if err != nil || got != explicit {
+		t.Fatalf("explicit path: path=%q, err=%v; want %q", got, err, explicit)
+	}
+	if _, err := os.Stat(defaultPath); !os.IsNotExist(err) {
+		t.Fatalf("explicit path unexpectedly created the default config: %v", err)
+	}
+
+	got, err = ResolvePath("")
+	if err != nil || got != defaultPath {
+		t.Fatalf("new default: path=%q, err=%v; want %q", got, err, defaultPath)
+	}
+	info, err := os.Stat(defaultPath)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("default config permissions: info=%v, err=%v", info, err)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(defaultPath))
+	if err != nil || dirInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("default config directory permissions: info=%v, err=%v", dirInfo, err)
+	}
+	contents, err := os.ReadFile(defaultPath)
+	if err != nil || !strings.Contains(string(contents), "readOnly: true") || strings.Contains(string(contents), "\nofflineToken:") {
+		t.Fatalf("unexpected initial config: err=%v, contents=%q", err, contents)
+	}
+	withToken(t)
+	c, err := Load(got)
+	if err != nil || !c.IsReadOnly() {
+		t.Fatalf("initial config was not loaded read-only: config=%+v, err=%v", c, err)
+	}
+	custom := []byte("readOnly: false\nmaxResults: 25\n")
+	if err := os.WriteFile(defaultPath, custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ResolvePath("")
+	if err != nil || got != defaultPath {
+		t.Fatalf("present default: path=%q, err=%v; want %q", got, err, defaultPath)
+	}
+	contents, err = os.ReadFile(defaultPath)
+	if err != nil || string(contents) != string(custom) {
+		t.Fatalf("existing default was overwritten: err=%v, contents=%q", err, contents)
+	}
+	if _, err := Load(got); err != nil {
+		t.Fatal("existing default config failed to load")
+	}
+	if _, err := Load(explicit); err == nil {
+		t.Fatal("a missing explicit config must fail")
+	}
+}
+
+func TestDefaultFileAndEnvironmentMergeByKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	defaultPath := filepath.Join(home, ".config", "rh-sc-mcp", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultPath, []byte("offlineToken: from-file\nreadOnly: false\nmaxResults: 25\nbaseURL: https://file.example/support\nhttp:\n  addr: 127.0.0.1:8080\n  token: file-http-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RH_SC_OFFLINE_TOKEN", "from-env")
+	t.Setenv("RH_SC_READ_ONLY", "true")
+	t.Setenv("RH_SC_MCP_HTTP_TOKEN", "env-http-token")
+
+	path, err := ResolvePath("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OfflineToken != "from-env" || !c.IsReadOnly() || c.HTTP.Token != "env-http-token" {
+		t.Fatal("environment values did not override their matching config keys")
+	}
+	if c.MaxResults != 25 || c.BaseURL != "https://file.example/support" || c.HTTP.Addr != "127.0.0.1:8080" {
+		t.Fatal("unrelated file values were lost during environment override")
+	}
+}
+
 func TestDefaultsAreReadOnlyAndPointAtThePublishedEndpoint(t *testing.T) {
 	withToken(t)
 	c, err := Load("")

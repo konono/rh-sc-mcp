@@ -12,15 +12,62 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+const initialConfig = `# rh-sc-mcp configuration. Keep this file private if it contains a token.
+# Set RH_SC_OFFLINE_TOKEN in the environment, or add offlineToken: here.
+# The server remains read-only unless both readOnly and resource permissions
+# are explicitly changed. See config.example.yaml for all available keys.
+readOnly: true
+`
+
+// ResolvePath uses an explicit path when supplied, otherwise the default file
+// under ~/.config/rh-sc-mcp. It creates a minimal read-only config on first
+// use, without putting any credential in it. An explicit path is never created.
+func ResolvePath(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("find home directory for default config: %w", err)
+	}
+	defaultPath := filepath.Join(home, ".config", "rh-sc-mcp", "config.yaml")
+	_, err = os.Stat(defaultPath)
+	if err == nil {
+		return defaultPath, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("check default config %s: %w", defaultPath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0o700); err != nil {
+		return "", fmt.Errorf("create default config directory: %w", err)
+	}
+	f, err := os.OpenFile(defaultPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if os.IsExist(err) { // Another process created it after the Stat call.
+		return defaultPath, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("create default config %s: %w", defaultPath, err)
+	}
+	_, writeErr := f.WriteString(initialConfig)
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(defaultPath)
+		return "", fmt.Errorf("write default config %s: %w", defaultPath, errors.Join(writeErr, closeErr))
+	}
+	return defaultPath, nil
+}
 
 // Default endpoints. These come from the published Case Management API
 // document (Swagger 2.0, host api.access.redhat.com, basePath /support) and
