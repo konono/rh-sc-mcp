@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/konono/rh-sc-mcp/compare/v0.2.0...v0.3.0) (2026-10-25)
+
+
+### Features
+
+* create a default configuration on first run ([f870f1b](https://github.com/konono/rh-sc-mcp/commit/f870f1b2331e658c1e1d68266124632e70965b82))
+* install with `go install`, and update by re-running it ([6a07d78](https://github.com/konono/rh-sc-mcp/commit/6a07d78f8d687bf6f74de43f5e9973f1008fedf7), [19f991b](https://github.com/konono/rh-sc-mcp/commit/19f991b5f9b848887d4a2cef4a566afcb02a51e1)). `rh-sc-mcp update` refuses to act unless the toolchain would install over the binary that is running.
+* register the MCP server with Claude Code from `install.sh`, leaving any existing registration untouched ([646597f](https://github.com/konono/rh-sc-mcp/commit/646597fd91fa40d39a324aecfe0e7de32fe6c58f))
+
 ## [0.2.0](https://github.com/konono/rh-sc-mcp/compare/v0.1.0...v0.2.0) (2026-10-24)
 
 
