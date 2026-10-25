@@ -21,7 +21,7 @@ import (
 
 func main() {
 	var (
-		cfgPath     = flag.String("config", os.Getenv("RH_SC_MCP_CONFIG"), "path to the configuration YAML (also $RH_SC_MCP_CONFIG)")
+		cfgPath     = flag.String("config", os.Getenv("RH_SC_MCP_CONFIG"), "path to the configuration YAML (default: ~/.config/rh-sc-mcp/config.yaml, created on first use; also $RH_SC_MCP_CONFIG)")
 		printScope  = flag.Bool("print-scope", false, "print the resolved scope and the tools it exposes, then exit")
 		checkAuth   = flag.Bool("check-auth", false, "exchange the offline token and probe the API, then exit; prints no credential")
 		showVersion = flag.Bool("version", false, "print version and exit")
@@ -34,7 +34,11 @@ func main() {
 		return
 	}
 
-	cfg, err := config.Load(*cfgPath)
+	resolvedPath, err := config.ResolvePath(*cfgPath)
+	if err != nil {
+		fatal(err)
+	}
+	cfg, err := config.Load(resolvedPath)
 	if err != nil {
 		fatal(err)
 	}
