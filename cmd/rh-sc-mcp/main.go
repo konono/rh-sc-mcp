@@ -17,6 +17,7 @@ import (
 
 	"github.com/konono/rh-sc-mcp/internal/config"
 	"github.com/konono/rh-sc-mcp/internal/server"
+	"github.com/konono/rh-sc-mcp/internal/update"
 )
 
 func main() {
@@ -27,7 +28,21 @@ func main() {
 		showVersion = flag.Bool("version", false, "print version and exit")
 		httpAddr    = flag.String("http", "", "serve MCP over Streamable HTTP on this address (e.g. :8080) instead of stdio; also `http.addr` or $RH_SC_MCP_HTTP_ADDR")
 	)
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rh-sc-mcp [flags] | rh-sc-mcp update")
+		fmt.Fprintln(os.Stderr, "  update  Install the latest verified GitHub Release over this executable")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
+	if args := flag.Args(); len(args) > 0 {
+		if len(args) != 1 || args[0] != "update" {
+			fatal(fmt.Errorf("unknown command %q (try --help)", args[0]))
+		}
+		if err := update.Run(context.Background(), server.Version, os.Stdout); err != nil {
+			fatal(err)
+		}
+		return
+	}
 
 	if *showVersion {
 		fmt.Println("rh-sc-mcp " + server.Version)
