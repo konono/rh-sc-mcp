@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/konono/rh-sc-mcp/compare/v0.2.0...v0.3.0) (2026-10-25)
+
+
+### Features
+
+* add Go install onboarding and self update ([9391218](https://github.com/konono/rh-sc-mcp/commit/9391218d5aa082a745151c4b0ab809d51abc3f0a))
+* add Go install onboarding and self update ([6a07d78](https://github.com/konono/rh-sc-mcp/commit/6a07d78f8d687bf6f74de43f5e9973f1008fedf7))
+* create default config on first run ([f6aa876](https://github.com/konono/rh-sc-mcp/commit/f6aa8764d56d1fab2b7d82bf8062fc284a1e3989))
+* create default config on first run ([f870f1b](https://github.com/konono/rh-sc-mcp/commit/f870f1b2331e658c1e1d68266124632e70965b82))
+* register the MCP server with Claude Code from install.sh ([646597f](https://github.com/konono/rh-sc-mcp/commit/646597fd91fa40d39a324aecfe0e7de32fe6c58f))
+
 ## [0.2.0](https://github.com/konono/rh-sc-mcp/compare/v0.1.0...v0.2.0) (2026-10-24)
 
 
