@@ -12,6 +12,7 @@ Red Hat サポートケース管理 API を MCP (Model Context Protocol) ツー�
 - [必要なもの](#必要なもの)
 - [最短で使う (Claude Code)](#最短で使う-claude-code)
 - [インストールと更新](#インストールと更新)
+- [アンインストール](#アンインストール)
 - [設定](#設定)
 - [MCP クライアントからの接続](#mcp-クライアントからの接続)
   - [stdio で接続する](#stdio-で接続する)
@@ -149,6 +150,44 @@ make fmt
 make vet
 make lint    # golangci-lint (.golangci.yml)
 ```
+
+---
+
+## アンインストール
+
+**すべてを消す 1 コマンドはありません。** 4 つの動かし方はそれぞれ別の場所に別のものを残し、そのいくつかは他のソフトウェアと共有しています。どれを指しているのかを推測する代わりに、面ごとに分けてあります。
+
+```bash
+make uninstall-stdio                                      # Claude Code の "rh-sc" 登録
+make uninstall-http          PORT=8080                    # "rh-sc-http" 登録 (+ 使用中ポートの報告)
+make uninstall-binary        CONFIRM=<path>               # go install したバイナリ
+make uninstall-podman        CONTAINER=rh-sc-mcp          # 指定したコンテナ / イメージ
+make uninstall-openshift     NAMESPACE=rh-sc-mcp          # namespace 内のこのアプリの資源
+make uninstall-credentials   CONFIRM=<dir>                # ~/.config/rh-sc-mcp の token
+```
+
+### 名指ししない限り消さないもの
+
+| 対象 | 理由 |
+|---|---|
+| `~/.config/rh-sc-mcp` の token | offline token の再発行は Red Hat のポータルに行く作業です。アンインストールはそれを失う理由になりません |
+| OpenShift の namespace | たいていこのアプリより古く、他のものが入っています |
+| `go install` したバイナリ | stdio と HTTP が同じ 1 ファイルを指していることがあり、片方のために消すともう片方が壊れます |
+| 動いているプロセス | ポートを掴んでいる相手には、このスクリプトからは見えない所有者と再起動ポリシーがあります |
+
+### それぞれの境界
+
+**stdio / HTTP は Claude Code の登録を外します。** stdio は `rh-sc`、HTTP は `rh-sc-http` です。scope は別々のレジストリなので、`SCOPE`(既定 `user`) が実際の scope と食い違えば**何もせずに停止**します。project / local scope の登録は今いるディレクトリに紐づくため、cwd も表示します。`URL` を渡した場合は登録済みの URL と完全一致した時だけ進みます。
+
+登録の中身は**表示しません**。HTTP の登録は `Authorization` ヘッダを持てますし、URL はクエリに資格情報を含みえます。出すのは名前・scope・cwd だけです。中身を見たいときは `claude mcp get <name>` を自分で実行してください。
+
+**HTTP のサーバープロセスは止めません。** `PORT` を渡すと誰が掴んでいるかを表示しますが、kill はしません。shell のジョブなのか launchd / systemd のユニットなのかでやめさせ方が違い、監視下のプロセスなら殺してもすぐ戻ってきます。所有者が分かってから自分で止めてください。`PORT` を省略しても登録解除は行われます — リモートの HTTP サーバーにはローカルのポートがないためです。
+
+**Podman は名指ししたものだけです。** `CONTAINER` と `IMAGE` のどちらも推測しません。パターンも使いません。`podman rmi $(podman images -q rh-sc-mcp)` のような形は、名前の似た他人のイメージを巻き込みます。
+
+**OpenShift は指定 namespace 内の、このアプリの資源だけです。** `deployment` / `service` / `route` / 生成された `configmap/rh-sc-mcp-<hash>` / `secret/rh-sc-mcp` を消します。生成 ConfigMap の一覧取得に失敗した場合は**何も消さずに停止**します — 権限エラーを「対象なし」と取り違えると、成功に見えるのに残る、という一番まずい結果になるためです。
+
+`secret/rh-sc-mcp` は**既定で消します**。ワークロードだけ消えて資格情報が誰も見ていない namespace に残るほうが悪い既定だからです。原本は `~/.config/rh-sc-mcp` にあり、`make deploy` がそこから書き直します。この Secret が別の誰かのものである場合や、すぐ再デプロイする場合は `KEEP_SECRET=1` で残せます (残した場合は終了時に警告を出します)。
 
 ---
 
@@ -554,15 +593,35 @@ kubectl kustomize deploy/overlays/openshift  | grep 'image:'
 
 ### 認証情報と scope
 
+**OpenShift なら [`make deploy`](#make-でデプロイする) が Secret も作ります。** `~/.config/rh-sc-mcp` の token ファイルから読み、改行を落として `--from-file` で渡すので、下の手順を自分で踏む必要はありません。
+
+Kubernetes overlay を使う場合や、Secret だけ先に作りたい場合は次のようにします。**`--from-literal` は使わないでください** — 値が `kubectl` の `argv` に乗り、同じホストの誰でも `ps` で読めます。
+
 ```bash
 # 1. 認証情報。offline token と共有 HTTP token は別の値にすること。
-kubectl create secret generic rh-sc-mcp \
-  --from-literal=offlineToken="$RH_SC_OFFLINE_TOKEN" \
-  --from-literal=httpToken="$(openssl rand -hex 32)"
+#    ファイル経由で渡す。末尾の改行は Secret の値に入ってしまうので落とす。
+mkdir -p ~/.config/rh-sc-mcp && chmod 700 ~/.config/rh-sc-mcp
+install -m 600 /dev/null ~/.config/rh-sc-mcp/token
+$EDITOR ~/.config/rh-sc-mcp/token          # offline token を貼る
+( umask 077; openssl rand -hex 32 | tr -d '\n' > ~/.config/rh-sc-mcp/http-token )
 
-# 2. scope。readOnly と resources を確認する。
+# 2. Secret を作る。末尾改行を落とした一時ファイルを経由する。
+#    サブシェルにまとめてあるのは、kubectl が失敗しても必ず消すため。
+(
+  umask 077                                  # dir 700 / file 600
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT                  # 成功・失敗どちらでも消える
+  printf '%s' "$(cat ~/.config/rh-sc-mcp/token)" > "$tmp/offlineToken"
+  kubectl create secret generic rh-sc-mcp \
+    --from-file=offlineToken="$tmp/offlineToken" \
+    --from-file=httpToken="$HOME/.config/rh-sc-mcp/http-token"
+)
+
+# 3. scope。readOnly と resources を確認する。
 $EDITOR deploy/base/config.yaml
 ```
+
+サーバーは環境変数を trim しないので、**値に改行が残ると** offline token は SSO が `invalid_grant` を返し、bearer token は照合が外れて全リクエストが `401` になります。原因の分かりにくい失敗なので、`--from-file` に渡すファイルは必ず改行なしにしてください。
 
 `deploy/base/secret.example.yaml` は `REPLACE_ME` 入りのテンプレートです。実値を入れたファイルは `.gitignore` 済み (`deploy/**/secret.yaml` 等) なので、サンプルだけが追跡されます。
 
@@ -580,6 +639,42 @@ kubectl kustomize deploy/overlays/openshift
 ```bash
 oc apply -k deploy/overlays/openshift
 ```
+
+これは手で順番に実行する形です。ビルド・適用・確認を毎回同じ手順で行うなら、次の `make` を使ってください。段階は同じで、各段を 1 コマンドにしてあります。
+
+### `make` でデプロイする
+
+`scripts/deploy-openshift.sh` を Makefile から呼びます。`NAMESPACE` と `IMAGE` に既定値はありません。どちらも書き込み先を指す値で、既定を決めるとこちらが勝手に選ぶことになるためです。
+
+```bash
+# 1. ビルドして push。ARCH は必須 (ノードと違うと Exec format error で落ちる)
+make deploy-image IMAGE=registry.example.com/ns/rh-sc-mcp:v0.3.1 ARCH=amd64
+
+# 2. 何が適用されるかを見る (クラスタは変更しない)
+make deploy-plan NAMESPACE=rh-sc-mcp IMAGE=registry.example.com/ns/rh-sc-mcp:v0.3.1
+
+# 3. 適用
+make deploy NAMESPACE=rh-sc-mcp IMAGE=registry.example.com/ns/rh-sc-mcp:v0.3.1
+
+# 4. 状態と Route URL
+make deploy-status NAMESPACE=rh-sc-mcp
+```
+
+**token はファイルから読みます。** `~/.config/rh-sc-mcp/token` に Red Hat の offline token を `chmod 600` で置いてください。共有 bearer token (`http-token`) は無ければ生成して同じ場所に保存し、以後使い回します — 毎回作り直すと、設定済みのクライアントが全部 `401` になるからです。検証用に別のディレクトリを使うときは `RH_SC_MCP_CREDENTIAL_DIR` で差し替えられます。
+
+| 項目 | 扱い |
+|---|---|
+| 値の渡し方 | `--from-file`。`--from-literal` は値が `argv` に乗り `ps` で見えます |
+| 末尾の改行 | 取り除きます。サーバーは環境変数を trim しないので、残ると SSO が `invalid_grant`、bearer 照合が全件 `401` になります |
+| 値の中の空白 | **拒否します**。黙って削ると、原因の分からない `401` に化けます |
+| 出力 | 値・ハッシュ・長さのいずれも出しません |
+| ConfigMap | `deploy/base/config.yaml` に `offlineToken` / `http.token` があれば適用前に停止します。そこに書いた値は、その ConfigMap を読める権限を持つ相手に見えます |
+
+**手元で確かめられることは、クラスタを触る前に確かめます。** token ファイルの不在・権限・改行・値の中の空白、そして kustomize のレンダエラーは、namespace を作る前に出ます。
+
+ただし**それ以降の失敗までは防げません**。namespace を作ったあとの Secret 作成や `oc apply` が RBAC や通信で失敗すれば、**空の namespace は残ります**。その場合は原因を直して再実行してください — 同じコマンドを繰り返して問題ない作りです。
+
+**消すものはありません。** `oc apply` は `--prune` なしで実行します。overlay から消したリソースはクラスタに残るので、片付けは意図的に手で行ってください。Secret は毎回 `~/.config/rh-sc-mcp` の内容で上書きされ、その後 `oc rollout restart` が走ります — ConfigMap と違って Secret の名前はハッシュを持たないため、再起動しないと Pod は古い値のままです。
 
 ### Kubernetes
 
