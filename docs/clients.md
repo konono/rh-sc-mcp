@@ -34,10 +34,12 @@ HTTP の場合、クライアントが持つのは共有 bearer token だけで�
 GO_BIN_PATH="$(go env GOBIN)"
 # GOPATH は複数要素を持てる。go install が書くのは先頭要素なので、そこだけ取る
 if [ -z "$GO_BIN_PATH" ]; then GO_BIN_PATH="$(go env GOPATH | cut -d: -f1)/bin"; fi
-claude mcp add --scope local rh-sc -- "$GO_BIN_PATH/rh-sc-mcp"
+claude mcp add --scope user rh-sc -- "$GO_BIN_PATH/rh-sc-mcp"
 ```
 
-以前に `bin/rh-sc-mcp` など別のパスで `rh-sc` を登録した場合は、先に `claude mcp remove rh-sc -s local` で古い登録を削除してから上のコマンドを実行します。登録後は `claude mcp get rh-sc` で `Command` が Go のインストール先を指すことを確認できます (接続状態の確認には offline token が必要です)。`--scope local` は現在のプロジェクトにだけ登録します。
+`--scope user` は**すべてのプロジェクトから使える**登録です。`install.sh` が使う scope と同じで、これが既定の勧めです。**`claude mcp add` 自体の既定は `--scope local`** なので、`--scope` を省くと実行したディレクトリにしか登録されません。このプロジェクトでだけ試したい場合に限り `--scope local` に置き換えてください。
+
+以前に `bin/rh-sc-mcp` など別のパスで `rh-sc` を登録した場合は、先に `claude mcp remove rh-sc -s user` で古い登録を削除してから上のコマンドを実行します。過去に local scope で登録していた場合は、**その登録を行ったディレクトリで** `claude mcp remove rh-sc -s local` を実行して外してください (scope ごとに別のレジストリなので、user に登録しても local の登録は残ります)。登録後は `claude mcp get rh-sc` で `Scope` が `User config` に、`Command` が Go のインストール先になっていることを確認できます (接続状態の確認には offline token が必要です)。
 
 #### 設定ファイルで直接書く場合
 
