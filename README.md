@@ -12,8 +12,6 @@ Go 1.25 以降、対応する MCP クライアント、[Red Hat の offline toke
 
 ```bash
 go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest
-GO_BIN_PATH="$(go env GOBIN)"
-if [ -z "$GO_BIN_PATH" ]; then GO_BIN_PATH="$(go env GOPATH | cut -d: -f1)/bin"; fi
 ```
 
 保存先は `GOBIN`、未設定なら `GOPATH` の先頭要素の `bin/` です。次に、使うクライアントへこのバイナリを MCP サーバーとして登録します。
