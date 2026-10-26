@@ -136,9 +136,9 @@ spellcheck:     {}
 
 なお、この乖離はスタブに対するテストでは発見できませんでした。発見後、スタブ側にも同じ拒否を実装してあるので、プローブから条件を外すと該当テストが落ちます。
 
-### 7. コンテナは Podman と OpenShift 実クラスタで検証済み (Docker 自体では未実行)
+### 7. コンテナは Podman・OpenShift・公開イメージで検証済み
 
-2026-10-26 に Podman 5.7.1 で build と実行を、同日 OpenShift 実クラスタで overlay の適用を確認しました。`Dockerfile` は `docker build` 互換の記法ですが、**Docker CLI そのものでは実行していません**。
+2026-10-26 に Podman 5.7.1 で build と実行を、同日 OpenShift 実クラスタで overlay の適用を確認しました。v0.5.0 の GitHub Actions では Docker Buildx で linux/amd64・linux/arm64 を公開し、両方を `docker run --version` で起動確認しました。ローカルでも認証なしで arm64 イメージを pull し、`rh-sc-mcp 0.5.0` が返ることを確認しています。公開イメージを使った HTTP 通信や実クラスタでの配置はまだ確認していません。
 
 **マニフェスト相当の構成で動きます。** `deploy/base/deployment.yaml` と同じ条件 — read-only root filesystem、全 capability drop、`runAsUser` を固定せず任意に選んだ UID を与える、ConfigMap 相当を `/etc/rh-sc-mcp/config.yaml` にマウントし `--config` で渡す — で次を確認しました。
 
@@ -197,7 +197,7 @@ podman image inspect <image> --format '{{.Os}}/{{.Architecture}}'
 
 **制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
 
-リリース用の GitHub Actions で build したイメージの実行は、初回公開後に確認します。上記の実測はローカルで Podman により作成したイメージに対するものです。
+上の Podman / OpenShift の HTTP と stdio の実測は、ローカルで作成したイメージに対するものです。公開イメージについて確認した実行経路は `--version` までです。
 
 ### 8. severity / status / product の値は検証しない
 
