@@ -2,15 +2,18 @@
 
 ## [0.3.1](https://github.com/konono/rh-sc-mcp/compare/v0.3.0...v0.3.1) (2026-10-26)
 
+This release updates the documentation and build exclusions. Server behavior is unchanged apart from the reported version.
+
+### Documentation
+
+* record the observed `apiVersion: v1` read results and Podman container limits ([7dfc2a5](https://github.com/konono/rh-sc-mcp/commit/7dfc2a5a34d8469d281742b9bef764a69c7d63d3)).
+* clarify that a passing `--check-auth` does not establish that a known case can be fetched ([4f58490](https://github.com/konono/rh-sc-mcp/commit/4f5849080b7897b4e7ef1c0c5655b30dce0909d9)).
+* record idle container shutdown on `SIGTERM`; handling of in-flight requests remains unmeasured ([7d803ef](https://github.com/konono/rh-sc-mcp/commit/7d803efc7d1dc0fa5e32dacbba83a632897b5fe6)).
+* record an OpenShift test with two Ready pods under `restricted-v2`; Route certificate trust and cluster shutdown remain unverified ([c829eee](https://github.com/konono/rh-sc-mcp/commit/c829eee)).
 
 ### Bug Fixes
 
-* keep a root .kube out of git and the build context ([beba77d](https://github.com/konono/rh-sc-mcp/commit/beba77d514fbcb493bfaa6c1b7d84fb284bd0018))
-
-
-### Miscellaneous Chores
-
-* release 0.3.1 ([5756508](https://github.com/konono/rh-sc-mcp/commit/5756508bc967a3f0991e4818cc7ad03ae743832e))
+* exclude a repository-root `.kube` directory from git and the image build context ([beba77d](https://github.com/konono/rh-sc-mcp/commit/beba77d514fbcb493bfaa6c1b7d84fb284bd0018)).
 
 ## [0.3.0](https://github.com/konono/rh-sc-mcp/compare/v0.2.0...v0.3.0) (2026-10-25)
 
