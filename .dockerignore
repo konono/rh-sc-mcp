@@ -16,6 +16,13 @@ config.local.yaml
 *.local.yaml
 .env
 
+# Transient kustomize overlays and rendered manifests written by
+# scripts/deploy-openshift.sh. They live in the tree because kustomize
+# will not take an absolute path in `resources`, which puts them in the
+# build context — and a build running at the same time as a deploy
+# would copy another run's manifests into a layer.
+.deploy-tmp
+
 # A kubeconfig left in the repository root. It carries cluster
 # credentials, and the build stage does `COPY . .`, so without this it
 # lands in an intermediate layer even though the final distroless image

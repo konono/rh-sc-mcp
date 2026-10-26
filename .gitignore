@@ -1,6 +1,12 @@
 bin/
 dist/
 
+# Transient kustomize overlay written by scripts/deploy-openshift.sh.
+# It lives inside the tree because kustomize rejects an absolute path in
+# `resources`, and reaching outside the repository would need
+# --load-restrictor LoadRestrictionsNone.
+.deploy-tmp/
+
 # Local panecom pane/session state, not part of the project.
 .panecom/
 
