@@ -16,6 +16,6 @@ package version
 // been tested, so the safe course is to leave them where they are.
 
 // x-release-please-start-version
-const Version = "0.5.0"
+const Version = "0.5.1"
 
 // x-release-please-end

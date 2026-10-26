@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/konono/rh-sc-mcp/compare/v0.5.0...v0.5.1) (2026-10-26)
+
+
+### Miscellaneous Chores
+
+* release 0.5.1 ([7181b21](https://github.com/konono/rh-sc-mcp/commit/7181b21b0f4430643aa1eee692f64cf87b63ccef))
+
 ## [0.5.0](https://github.com/konono/rh-sc-mcp/compare/v0.4.0...v0.5.0) (2026-10-26)
 
 
