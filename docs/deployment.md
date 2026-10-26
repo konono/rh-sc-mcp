@@ -2,28 +2,28 @@
 
 [使い始める](../README.md) · [ドキュメント一覧](README.md)
 
-このページの `make`、`podman build`、`oc apply -k` の例は、リポジトリを取得してそのルートディレクトリで実行します。
+このページの `make` と `oc apply -k` の例は、リポジトリを取得してそのルートディレクトリで実行します。
 
 ## コンテナと Kubernetes / OpenShift
 
-`Dockerfile` と `deploy/` は、参照実装と同じ利用形態を再現するための**例**です。**イメージは公開していません** — `ghcr.io/konono/rh-sc-mcp` は例示値です。自分で build して自分が管理するレジストリに push してください。
+リリース時に `ghcr.io/konono/rh-sc-mcp:<release-tag>` と `:latest` を linux/amd64・linux/arm64 の両方で作成します。**デプロイには版を固定したタグ** (例 `v0.5.0`) を指定してください。初回公開後に GitHub Packages 側で package の visibility を Public にする必要があります。利用前に[パッケージページ](https://github.com/users/konono/packages/container/package/rh-sc-mcp)で公開状態を確認してください。
 
 ```bash
-docker build -t registry.example.com/your-org/rh-sc-mcp:v0.1.0 .
-docker push registry.example.com/your-org/rh-sc-mcp:v0.1.0
+podman pull ghcr.io/konono/rh-sc-mcp:<release-tag>
 ```
+
+イメージには credential や設定ファイルを含めていません。起動時に `--config` で設定ファイルをマウントし、Red Hat の offline token と別の共有 HTTP token を Secret から環境変数で渡します。OpenShift では後述の `make deploy` がこの Secret を作ります。
 
 ### イメージの差し替え方
 
-`deploy/base/kustomization.yaml` の `images:` を書き換えます。ここで**`name` は変更しません**。`name` は「どのイメージを置換するか」の照合キーで、`deployment.yaml` に書かれた値と一致している必要があります。ここを自分のレジストリに書き換えると照合が外れ、**kustomize は何も置換せず元の値のまま出力します** (エラーも警告も出ません)。
+`deploy/base/kustomization.yaml` の `images:` でタグを固定します。ここで**`name` は変更しません**。`name` は「どのイメージを置換するか」の照合キーで、`deployment.yaml` に書かれた値と一致している必要があります。ここを変更すると照合が外れ、**kustomize は何も置換せず元の値のまま出力します** (エラーも警告も出ません)。
 
-変えるのは `newName` と `newTag` です。
+公式イメージなら `newTag` のみ変更します。別レジストリへ複製する場合は `newName` も変更します。
 
 ```yaml
 images:
   - name: ghcr.io/konono/rh-sc-mcp              # 照合キー。触らない
-    newName: registry.example.com/your-org/rh-sc-mcp
-    newTag: v0.1.0
+    newTag: <release-tag>
 ```
 
 適用前に、置換後のイメージを目で確認してください。
@@ -31,10 +31,10 @@ images:
 ```bash
 kubectl kustomize deploy/overlays/kubernetes | grep 'image:'
 kubectl kustomize deploy/overlays/openshift  | grep 'image:'
-# → image: registry.example.com/your-org/rh-sc-mcp:v0.1.0
+# → image: ghcr.io/konono/rh-sc-mcp:<release-tag>
 ```
 
-`ghcr.io/konono/...` のままなら、`name` を書き換えてしまっているか、`newName` を設定していません。
+指定したタグに変わらない場合は、`name` を書き換えて照合が外れていないか確認してください。
 
 ### 認証情報と scope
 
@@ -92,18 +92,17 @@ oc apply -k deploy/overlays/openshift
 `scripts/deploy-openshift.sh` を Makefile から呼びます。`NAMESPACE` と `IMAGE` に既定値はありません。どちらも書き込み先を指す値で、既定を決めるとこちらが勝手に選ぶことになるためです。
 
 ```bash
-# 1. ビルドして push。ARCH は必須 (ノードと違うと Exec format error で落ちる)
-make deploy-image IMAGE=registry.example.com/ns/rh-sc-mcp:v0.3.1 ARCH=amd64
+# 1. 何が適用されるかを見る (クラスタは変更しない)
+make deploy-plan NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:<release-tag>
 
-# 2. 何が適用されるかを見る (クラスタは変更しない)
-make deploy-plan NAMESPACE=rh-sc-mcp IMAGE=registry.example.com/ns/rh-sc-mcp:v0.3.1
+# 2. 適用 (ビルドと push は不要)
+make deploy NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:<release-tag>
 
-# 3. 適用
-make deploy NAMESPACE=rh-sc-mcp IMAGE=registry.example.com/ns/rh-sc-mcp:v0.3.1
-
-# 4. 状態と Route URL
+# 3. 状態と Route URL
 make deploy-status NAMESPACE=rh-sc-mcp
 ```
+
+自分で改変したイメージを使う場合だけ、`make deploy-image IMAGE=<registry>/<name>:<tag> ARCH=<node-arch>` でビルド・push できます。
 
 **token はファイルから読みます。** `~/.config/rh-sc-mcp/token` に Red Hat の offline token を `chmod 600` で置いてください。共有 bearer token (`http-token`) は無ければ生成して同じ場所に保存し、以後使い回します — 毎回作り直すと、設定済みのクライアントが全部 `401` になるからです。検証用に別のディレクトリを使うときは `RH_SC_MCP_CREDENTIAL_DIR` で差し替えられます。
 

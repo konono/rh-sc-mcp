@@ -19,10 +19,8 @@ generatorOptions:
 images:
   # `name` is the match key: it has to keep matching the image written in
   # deployment.yaml, or kustomize finds nothing to rewrite and silently
-  # leaves the original in place. To point at your own registry, leave
-  # this line alone and set newName/newTag below.
+  # leaves the original in place. Set newTag to a published release tag;
+  # use newName only when deploying a copy in another registry.
   - name: ghcr.io/konono/rh-sc-mcp
-    # Nothing is published under that name. Build the image yourself and
-    # uncomment this, pointing at a registry you control:
     # newName: registry.example.com/your-org/rh-sc-mcp
     newTag: latest

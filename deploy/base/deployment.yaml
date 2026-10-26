@@ -20,8 +20,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rh-sc-mcp
-          # Example value. No image is published for this project; build
-          # and push to a registry you control before applying.
+          # Release images are published to GHCR. Pin a release tag via
+          # kustomization.yaml or the deploy script before applying.
           image: ghcr.io/konono/rh-sc-mcp:latest
           args:
             - --config
