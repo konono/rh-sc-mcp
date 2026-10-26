@@ -8,13 +8,13 @@ Go 1.25 以降、対応する MCP クライアント、[Red Hat の offline toke
 
 ### 1. インストールと登録
 
-まずバイナリをインストールします。
+インストーラを実行します。内部で `go install` を使うため、Go 1.25 以降が必要です。
 
 ```bash
-go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest
+curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | sh
 ```
 
-保存先は `GOBIN`、未設定なら `GOPATH` の先頭要素の `bin/` です。次に、使うクライアントへこのバイナリを MCP サーバーとして登録します。
+Claude Code が見つかれば、インストーラは MCP サーバー `rh-sc` を user scope に登録します。既存の同名登録は変更しません。Codex、Cursor、OpenCode はバイナリのインストール後、各ガイドに従って登録してください。
 
 | クライアント | stdio の登録手順 |
 |---|---|
@@ -23,18 +23,17 @@ go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest
 | Cursor | [Cursor](docs/cursor.md) |
 | OpenCode | [OpenCode](docs/opencode.md) |
 
-Claude Code では `install.sh` によるインストールと自動登録もできます。他のクライアントの設定は変更しません。[インストールと更新の詳細](docs/installation.md)
+インストーラは他のクライアントの設定を変更しません。`go install` で手動インストールする方法、保存先、更新方法は[インストールと更新の詳細](docs/installation.md)を参照してください。
 
 ### 2. token を渡して起動
 
-MCP クライアントを起動する環境で offline token を入力します。入力は画面に表示されず、コマンド行にも値を残しません。
+MCP クライアントを起動する環境で offline token を設定します。
 
 ```bash
-printf 'Red Hat offline token: '
-read -rs RH_SC_OFFLINE_TOKEN
-printf '\n'
-export RH_SC_OFFLINE_TOKEN
+export RH_SC_OFFLINE_TOKEN='xxxxxxxxx'
 ```
+
+`xxxxxxxxx` を実際の token に置き換えてください。実値をコマンドに直接入力するとシェル履歴に残りうる点に注意してください。
 
 このシェルから登録したクライアントを起動し、MCP サーバー `rh-sc` が見えることを確認します。最初は「`rhcase_scope` を使って、利用可能な操作を教えて」と依頼できます。ケースを探すときは `rhcase_search` に検索語などの条件を渡してください。**条件なしの検索は API に拒否されるため、本サーバーも送信前に止めます。** GUI アプリでは起動方法によってシェルの環境変数を受け継がないことがあるため、その場合は [サーバーの設定ファイル](docs/configuration.md)に token を設定してください。
 
@@ -58,6 +57,8 @@ HTTP ではサーバーを常駐させ、クライアントは `/mcp` に接続�
 コンテナ、Kubernetes、OpenShift の手順と `make deploy-*` は [デプロイガイド](docs/deployment.md) にまとめています。**コンテナイメージは配布していません**。利用するレジストリ向けにビルドしてください。
 
 ## 更新と削除
+
+`rh-sc-mcp` が PATH にない場合は、インストーラが表示した絶対パスで実行してください。
 
 ```bash
 rh-sc-mcp update

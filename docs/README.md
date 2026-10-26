@@ -4,7 +4,7 @@
 
 | 知りたいこと | ページ |
 |---|---|
-| `go install`、`install.sh`、self update | [インストールと更新](installation.md) |
+| インストーラ、手動 `go install`、self update | [インストールと更新](installation.md) |
 | Claude Code、Codex、Cursor、OpenCode への stdio / HTTP 登録 | [MCP クライアント一覧](clients.md) |
 | 設定ファイル、環境変数、KCS と書き込み権限 | [設定と権限](configuration.md) |
 | ツール名、引数、応答 | [提供ツールと応答](tools.md) |
