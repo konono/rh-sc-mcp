@@ -22,6 +22,12 @@ token
 token.*
 *.token
 
+# A kubeconfig in the repository root holds cluster credentials. Root
+# anchored, like the config.yaml patterns above: a .kube somewhere else
+# in the tree is not this file. Also in .dockerignore, because the build
+# stage copies the whole context.
+/.kube/
+
 # Kubernetes Secrets. Only deploy/base/secret.example.yaml is tracked —
 # it is a template with REPLACE_ME placeholders. A filled-in copy holds
 # both the Red Hat offline token and the shared HTTP token, and the two

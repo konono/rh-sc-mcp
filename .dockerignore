@@ -15,3 +15,9 @@ config.yaml
 config.local.yaml
 *.local.yaml
 .env
+
+# A kubeconfig left in the repository root. It carries cluster
+# credentials, and the build stage does `COPY . .`, so without this it
+# lands in an intermediate layer even though the final distroless image
+# only takes the binary.
+.kube
