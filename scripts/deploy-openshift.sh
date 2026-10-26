@@ -417,7 +417,7 @@ cmd_status() {
       printf 'MCP endpoint: https://%s/mcp\n' "$host"
       printf '  Clients must send the shared bearer token.\n'
       printf '  The router certificate has not been validated against a client trust\n'
-      printf '  store here; see limitation 7 in README.md before publishing this URL.\n'
+      printf '  store here; see limitation 7 in docs/limitations.md before publishing this URL.\n'
     else
       printf 'Route %s exists in %s but has no host yet.\n' "$APP" "$NAMESPACE"
     fi
