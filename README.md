@@ -929,8 +929,13 @@ spellcheck:     {}
 | `/mcp` (token なし / あり) | `401` / JSON-RPC の result |
 | コンテナ内の stdio `initialize` | JSON-RPC の result |
 | 起動ログ | HTTP 有効化の警告が出る。token の出力なし |
+| `SIGTERM` での停止 | `shutting down` を記録して終了コード `0`。`podman stop` も同じで、既定の 10 秒待ちを使い切らない |
 
 これで[コンテナと Kubernetes / OpenShift](#コンテナと-kubernetes--openshift) に書いた「割り当てられた UID に依存しない」という記述は、設計意図だけでなく 1 件の実測に裏付けられたことになります。**検証したのは UID 1000650000 の 1 値だけ**で、OpenShift が割り当てうる範囲を網羅したわけではありません。
+
+**今回のアイドル状態での停止は SIGTERM で完結しました。** `podman kill --signal TERM` を送ると、プロセスは `shutting down` を記録して終了コード `0` で終わります。`podman stop` でも終了コードは `0` で、コマンドが戻るまで 0.373 秒 — 既定の 10 秒待ちを使い切らず、SIGKILL への昇格には至っていません。
+
+ただし**計測時に処理中のリクエストはありませんでした**。HTTP サーバーは SIGTERM を受けたあと処理中の HTTP リクエストの終了を最大 20 秒待つ設計ですが、その待ち時間そのものを負荷をかけた状態で測ってはいません。上の数値は「捌くものが何も無いときの停止」です。
 
 **制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
 
