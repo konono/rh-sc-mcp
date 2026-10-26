@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/konono/rh-sc-mcp/compare/v0.3.0...v0.3.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* keep a root .kube out of git and the build context ([beba77d](https://github.com/konono/rh-sc-mcp/commit/beba77d514fbcb493bfaa6c1b7d84fb284bd0018))
+
+
+### Miscellaneous Chores
+
+* release 0.3.1 ([5756508](https://github.com/konono/rh-sc-mcp/commit/5756508bc967a3f0991e4818cc7ad03ae743832e))
+
 ## [0.3.0](https://github.com/konono/rh-sc-mcp/compare/v0.2.0...v0.3.0) (2026-10-25)
 
 
