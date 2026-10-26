@@ -85,17 +85,42 @@ if existing="$(claude mcp get "$SERVER_NAME" 2>/dev/null)"; then
 	echo "Claude Code already has an MCP server named \"$SERVER_NAME\"; leaving it alone."
 	echo "  Scope:   ${existing_scope:-unknown}"
 	echo "  Command: ${existing_command:-unknown}"
+
+	# `claude mcp get` prints the scope as prose -- "Local config (private
+	# to you in this project)" -- not as the value --scope takes. Match on
+	# the leading word, and only to recognise a scope that is definitely
+	# *not* user. Wording we do not know falls through to the empty string
+	# and stays quiet, because a wrong migration hint is worse than none.
+	case "$existing_scope" in
+	Local*) existing_scope_flag="local" ;;
+	Project*) existing_scope_flag="project" ;;
+	*) existing_scope_flag="" ;;
+	esac
+
 	if [ -n "$existing_command" ] && [ "$existing_command" != "$BIN_PATH" ]; then
 		echo
 		echo "That is not the binary just installed:"
-		echo "  installed: $BIN_PATH"
+		echo "  installed:  $BIN_PATH"
 		echo "  registered: $existing_command"
+	fi
+
+	if [ -n "$existing_scope_flag" ]; then
+		# Reached even when the path already matches: a local entry that
+		# points at the right binary is still invisible from every other
+		# directory, which is the one thing the installer's own scope is
+		# chosen to avoid.
+		echo
+		echo "That entry is ${existing_scope_flag}-scoped, so it applies only to the directory"
+		echo "it was added from. This installer registers with --scope $SCOPE, which applies"
+		echo "to every project. To move it, run these from that directory:"
+		echo "  claude mcp remove $SERVER_NAME --scope $existing_scope_flag"
+		register_hint
+	elif [ -n "$existing_command" ] && [ "$existing_command" != "$BIN_PATH" ]; then
+		echo
 		echo "To point Claude Code at the new one, remove and re-add it in the scope"
 		echo "it currently lives in. For a user-scope entry:"
-		echo "  claude mcp remove $SERVER_NAME --scope user"
-		echo "  claude mcp add --scope user $SERVER_NAME -- $(shq "$BIN_PATH")"
-		echo "For a project- or local-scope entry, use that scope instead, and run"
-		echo "the commands from the directory the entry belongs to."
+		echo "  claude mcp remove $SERVER_NAME --scope $SCOPE"
+		register_hint
 	fi
 	exit 0
 fi

@@ -18,9 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | 
 | Claude Code が無い | **インストールは成功**。登録は行わず、後から実行するコマンドを表示 |
 | `rh-sc` が未登録 | `--scope user` で登録。登録内容と scope を表示 |
 | `rh-sc` が登録済み | **scope を問わず一切変更しません。** 現在の Scope と Command を表示 |
-| 登録済みでパスが違う | 上に加えて、インストール先と登録先の両方を示し、該当 scope での `remove` / `add` 手順を表示 (実行はしません) |
+| 登録済みでパスが違う | 上に加えて、インストール先と登録先の両方を示す |
+| 登録済みで scope が `local` / `project` | 上に加えて、`user` scope へ移す `remove` / `add` 手順を表示 (実行はしません) |
 
-登録の scope は **`user`** です。`install.sh` は任意のディレクトリから実行されるため、`local` だとそのディレクトリにだけ登録されてしまいます。[Claude Code の手動登録手順](clients.md#stdio-で接続する)で案内している登録は `local` のままです — こちらは特定のプロジェクトで試すことを想定しているためです。
+登録の scope は **`user`** です。`install.sh` は任意のディレクトリから実行されるため、`local` だとそのディレクトリにだけ登録されてしまいます。[Claude Code の手動登録手順](clients.md#stdio-で接続する)も `user` に揃えてあります。**`claude mcp add` 自体の既定は `local`** なので、手で登録するときに `--scope` を省くと実行したディレクトリ限定になる点に注意してください。
+
+既存の登録が `local` / `project` scope だった場合も、`install.sh` はそれを書き換えません。パスが一致していても「そのディレクトリでしか使えない」状態は残るため、`user` scope へ移すコマンドを表示します。移行は scope を持つディレクトリで実行してください。scope の判定は `claude mcp get` が出す `Scope` 行の先頭語 (`Local` / `Project`) で行い、**認識できない表記のときは何も表示しません** — 誤った移行手順を出すよりは黙るほうが安全なためです。
 
 このスクリプトが自動登録するのは Claude Code だけです。Codex、Cursor、OpenCode を使う場合は、同じ `go install` 済みバイナリを[各クライアントの手順](clients.md)で登録してください。どのクライアントでもサーバー側の権限設定は共通です。
 
