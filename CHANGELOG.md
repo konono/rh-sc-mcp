@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/konono/rh-sc-mcp/compare/v0.4.0...v0.5.0) (2026-10-26)
+
+
+### Features
+
+* publish multi-platform container images to GHCR ([#10](https://github.com/konono/rh-sc-mcp/issues/10)) ([ad2dfb2](https://github.com/konono/rh-sc-mcp/commit/ad2dfb29f65a7d97c1e250bbc82f379c04093763))
+
 ## [0.4.0](https://github.com/konono/rh-sc-mcp/compare/v0.3.1...v0.4.0) (2026-10-26)
 
 
