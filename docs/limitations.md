@@ -138,7 +138,7 @@ spellcheck:     {}
 
 ### 7. コンテナは Podman・OpenShift・公開イメージで検証済み
 
-2026-10-26 に Podman 5.7.1 で build と実行を、同日 OpenShift 実クラスタで overlay の適用を確認しました。v0.5.0 の GitHub Actions では Docker Buildx で linux/amd64・linux/arm64 を公開し、両方を `docker run --version` で起動確認しました。ローカルでも認証なしで arm64 イメージを pull し、`rh-sc-mcp 0.5.0` が返ることを確認しています。公開イメージを使った HTTP 通信や実クラスタでの配置はまだ確認していません。
+2026-10-26 に Podman 5.7.1 で build と実行を、同日 OpenShift 実クラスタで overlay の適用を確認しました。v0.5.0 の GitHub Actions では Docker Buildx で linux/amd64・linux/arm64 を公開し、両方を `docker run --version` で起動確認しました。ローカルでも認証なしで arm64 イメージを pull し、`rh-sc-mcp 0.5.0` が返ることを確認しています。公開イメージの OpenShift 配置と HTTP 通信も、下記の範囲で確認しました。
 
 **マニフェスト相当の構成で動きます。** `deploy/base/deployment.yaml` と同じ条件 — read-only root filesystem、全 capability drop、`runAsUser` を固定せず任意に選んだ UID を与える、ConfigMap 相当を `/etc/rh-sc-mcp/config.yaml` にマウントし `--config` で渡す — で次を確認しました。
 
@@ -197,7 +197,11 @@ podman image inspect <image> --format '{{.Os}}/{{.Architecture}}'
 
 **制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
 
-上の Podman / OpenShift の HTTP と stdio の実測は、ローカルで作成したイメージに対するものです。公開イメージについて確認した実行経路は `--version` までです。
+上の Podman / OpenShift の HTTP と stdio の実測は、ローカルで作成したイメージに対するものです。
+
+**公開イメージ v0.5.0 を使った追加検証:** 専用 namespace に `ghcr.io/konono/rh-sc-mcp:v0.5.0` を指定して base マニフェストを適用し、2 Pod が Ready になりました。1 回目は本番 offline token を Secret から渡し、Pod 内の `--check-auth` が `tokenExchange: ok` / `apiProbe: ok` を返しました。このプローブは読み取り専用の filter を 1 回送るだけで、ケースを取得できることまでは保証しません。ケースの作成・更新・コメント投稿は実行していません。
+
+2 回目は dummy offline token とランダムな共有 HTTP token に替え、Route を作らず Service への port-forward で `/healthz`・`/readyz` が `200`、未認証の `/mcp` が `401`、認証付き `initialize` が `200` で JSON-RPC result を返すことを確認しました。両方の検証 namespace と Secret は終了後に削除済みです。**公開イメージでの Route 経由の接続、実ケースの取得、実クラスタでの停止・drain は未確認**です。
 
 ### 8. severity / status / product の値は検証しない
 

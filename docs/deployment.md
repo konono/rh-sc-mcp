@@ -6,17 +6,17 @@
 
 ## コンテナと Kubernetes / OpenShift
 
-公開イメージは `ghcr.io/konono/rh-sc-mcp:v0.5.0` です。linux/amd64・linux/arm64 の両方を含み、認証なしの pull と arm64 イメージの `--version` を確認しました。`latest` もありますが、**デプロイには版を固定したタグ**を指定してください。[パッケージページ](https://github.com/users/konono/packages/container/package/rh-sc-mcp)は Public です。
+公開イメージは `ghcr.io/konono/rh-sc-mcp:latest` です。linux/amd64・linux/arm64 の両方を含み、認証なしの pull と arm64 イメージの `--version` を確認しました。**クラスタへのデプロイ時は、最新 Release のタグをコマンドで取得して、その版に固定します。** こうすればドキュメント内の版番号を書き直し忘れず、動くタグに意図せず追随することもありません。`latest` が移動しても既存 Pod は自動で入れ替わらないため、更新時は再デプロイが必要です。[パッケージページ](https://github.com/users/konono/packages/container/package/rh-sc-mcp)は Public です。
 
 ```bash
-podman pull ghcr.io/konono/rh-sc-mcp:v0.5.0
+podman pull ghcr.io/konono/rh-sc-mcp:latest
 ```
 
 イメージには credential や設定ファイルを含めていません。起動時に `--config` で設定ファイルをマウントし、Red Hat の offline token と別の共有 HTTP token を Secret から環境変数で渡します。OpenShift では後述の `make deploy` がこの Secret を作ります。
 
 ### イメージの差し替え方
 
-`deploy/base/kustomization.yaml` の `images:` でタグを固定します。ここで**`name` は変更しません**。`name` は「どのイメージを置換するか」の照合キーで、`deployment.yaml` に書かれた値と一致している必要があります。ここを変更すると照合が外れ、**kustomize は何も置換せず元の値のまま出力します** (エラーも警告も出ません)。
+手動で kustomize を使う場合は、`deploy/base/kustomization.yaml` の `images:` でタグを固定します。ここで**`name` は変更しません**。`name` は「どのイメージを置換するか」の照合キーで、`deployment.yaml` に書かれた値と一致している必要があります。ここを変更すると照合が外れ、**kustomize は何も置換せず元の値のまま出力します** (エラーも警告も出ません)。以下の `v0.5.0` は例で、実際の最新タグは `gh release view --repo konono/rh-sc-mcp --json tagName --jq .tagName` で確認してください。
 
 公式イメージなら `newTag` のみ変更します。別レジストリへ複製する場合は `newName` も変更します。
 
@@ -92,17 +92,27 @@ oc apply -k deploy/overlays/openshift
 `scripts/deploy-openshift.sh` を Makefile から呼びます。`NAMESPACE` と `IMAGE` に既定値はありません。どちらも書き込み先を指す値で、既定を決めるとこちらが勝手に選ぶことになるためです。
 
 ```bash
-# 1. 何が適用されるかを見る (クラスタは変更しない)
-make deploy-plan NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:v0.5.0
+# 1. 最新 Release のタグを取得する (gh CLI が必要)
+TAG="$(gh release view --repo konono/rh-sc-mcp --json tagName --jq .tagName)"
+IMAGE="ghcr.io/konono/rh-sc-mcp:$TAG"
 
-# 2. 適用 (ビルドと push は不要)
-make deploy NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:v0.5.0
+# 2. 何が適用されるかを見る (クラスタは変更しない)
+make deploy-plan NAMESPACE=rh-sc-mcp IMAGE="$IMAGE"
 
-# 3. 状態と Route URL
+# 3. 適用 (ビルドと push は不要)
+make deploy NAMESPACE=rh-sc-mcp IMAGE="$IMAGE"
+
+# 4. 状態と Route URL
 make deploy-status NAMESPACE=rh-sc-mcp
 ```
 
 自分で改変したイメージを使う場合だけ、`make deploy-image IMAGE=<registry>/<name>:<tag> ARCH=<node-arch>` でビルド・push できます。
+
+### 公開イメージの OpenShift 検証
+
+2026-10-26 に v0.5.0 を専用 namespace へ配置して確認しました。検証では Route を作らない base マニフェストを使い、Secret を `--from-file` で作成してから、イメージを v0.5.0 に固定した一時 overlay を適用しました。`oc rollout status deployment/rh-sc-mcp` で 2 Pod の Ready を確認し、Pod 内で `rh-sc-mcp --config /etc/rh-sc-mcp/config.yaml --check-auth` を実行しました。本番 offline token で SSO 交換と読み取り専用 API プローブが成功しています。
+
+HTTP は別の dummy token を使った配置で、`oc port-forward svc/rh-sc-mcp 18080:80` を通して確認しました。**Service のポートは 80** (コンテナは 8080) です。`/healthz` と `/readyz` は 200、未認証の `/mcp` は 401、認証付き initialize は 200 でした。両検証の namespace と Secret は削除済みです。公開イメージの Route 経由と実ケースの取得は未確認です ([検証範囲の詳細](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み))。
 
 **token はファイルから読みます。** `~/.config/rh-sc-mcp/token` に Red Hat の offline token を `chmod 600` で置いてください。共有 bearer token (`http-token`) は無ければ生成して同じ場所に保存し、以後使い回します — 毎回作り直すと、設定済みのクライアントが全部 `401` になるからです。検証用に別のディレクトリを使うときは `RH_SC_MCP_CREDENTIAL_DIR` で差し替えられます。
 
