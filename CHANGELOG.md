@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/konono/rh-sc-mcp/compare/v0.3.1...v0.4.0) (2026-10-26)
+
+
+### Features
+
+* automate OpenShift deployment and scoped uninstall ([3023ecf](https://github.com/konono/rh-sc-mcp/commit/3023ecf6401e7ad041803688cfafa1f81bbc2992))
+
 ## [0.3.1](https://github.com/konono/rh-sc-mcp/compare/v0.3.0...v0.3.1) (2026-10-26)
 
 This release updates the documentation and build exclusions. Server behavior is unchanged apart from the reported version.
