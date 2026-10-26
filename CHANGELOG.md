@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/konono/rh-sc-mcp/compare/v0.5.1...v0.5.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* register rh-sc at user scope, and say so when an existing entry is not ([#15](https://github.com/konono/rh-sc-mcp/issues/15)) ([6533a27](https://github.com/konono/rh-sc-mcp/commit/6533a2718f529ed275232276412fc5e3f668a204))
+
 ## [0.5.1](https://github.com/konono/rh-sc-mcp/compare/v0.5.0...v0.5.1) (2026-10-26)
 
 
