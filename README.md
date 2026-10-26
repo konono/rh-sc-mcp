@@ -575,7 +575,7 @@ kubectl kustomize deploy/overlays/openshift
 
 ### OpenShift
 
-`Route` は `host` を省いているのでクラスタが生成し、`termination: edge` がルーターの既定証明書を使います。追加の編集は不要です。
+`Route` は `host` を省いているのでクラスタが生成し、`termination: edge` がルーターの既定証明書を使います。追加の編集は不要です。ただしその既定証明書を MCP クライアント側が信頼できるかは別問題で、検証時はローカルの信頼ストアで検証できませんでした ([制限事項 7](#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行))。
 
 ```bash
 oc apply -k deploy/overlays/openshift
@@ -603,9 +603,9 @@ kubectl apply -k deploy/overlays/kubernetes
 
 マニフェストは、コンテナを非 root・read-only root filesystem・全 capability drop・`RuntimeDefault` seccomp で動かす設定にしています。イメージは `USER 65532:65532` を宣言しています (マニフェストの `runAsNonRoot` が数値の UID を必要とするため)。一方 OpenShift の `restricted-v2` SCC は namespace のレンジから任意の UID を割り当て、イメージの `USER` を無視します。
 
-**割り当てられた UID に依存しないよう、特定 UID やファイル所有権への依存を避けてあります** — バイナリは誰でも読める配置に置いてあり、**この構成ではマウントした設定を `--config` で読むだけで、起動時にファイルを書きません**。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。これは設計意図にとどまらず、**任意に選んだ UID 1000650000 で、read-only root filesystem + 全 capability drop のもと実際に動くことを Podman で確認済み**です ([制限事項 7](#7-コンテナは-podman-で検証済み-docker-自体では未実行))。確認したのはこの 1 つの UID で、全 UID を試したわけではありません。
+**割り当てられた UID に依存しないよう、特定 UID やファイル所有権への依存を避けてあります** — バイナリは誰でも読める配置に置いてあり、**この構成ではマウントした設定を `--config` で読むだけで、起動時にファイルを書きません**。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。これは設計意図にとどまりません。**任意に選んだ UID 1000650000 で、read-only root filesystem + 全 capability drop のもと実際に動くことを Podman で確認**し、さらに **OpenShift 実クラスタで `restricted-v2` が割り当てた UID 1000980000 でも Pod が Ready になることを確認**しました ([制限事項 7](#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行))。確認したのはこの 2 つの UID で、全 UID を試したわけではありません。
 
-書き込みが起きないのは `--config` を渡しているからです。これを省くと既定の設定ファイルを作ろうとして `$HOME` に書き込みます。マニフェストは `args` で常に渡すので該当しませんが、`CMD` を置き換える場合は[制限事項 7](#7-コンテナは-podman-で検証済み-docker-自体では未実行) を参照してください。
+書き込みが起きないのは `--config` を渡しているからです。これを省くと既定の設定ファイルを作ろうとして `$HOME` に書き込みます。マニフェストは `args` で常に渡すので該当しませんが、`CMD` を置き換える場合は[制限事項 7](#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行) を参照してください。
 
 OpenShift overlay の `Route` には 300 秒の HAProxy タイムアウトを付けています。streamed な MCP 応答は開いたままになるため、ルーターの既定 30 秒では切られます。Kubernetes overlay は代わりに `Ingress` を置きます。どちらも公開するのは `/mcp` だけで、プローブはクラスタ内に留めます。
 
@@ -914,9 +914,9 @@ spellcheck:     {}
 
 なお、この乖離はスタブに対するテストでは発見できませんでした。発見後、スタブ側にも同じ拒否を実装してあるので、プローブから条件を外すと該当テストが落ちます。
 
-### 7. コンテナは Podman で検証済み (Docker 自体では未実行)
+### 7. コンテナは Podman と OpenShift 実クラスタで検証済み (Docker 自体では未実行)
 
-2026-10-26 に Podman 5.7.1 で build と実行を確認しました。`Dockerfile` は `docker build` 互換の記法ですが、**Docker CLI そのものでは実行していません**。
+2026-10-26 に Podman 5.7.1 で build と実行を、同日 OpenShift 実クラスタで overlay の適用を確認しました。`Dockerfile` は `docker build` 互換の記法ですが、**Docker CLI そのものでは実行していません**。
 
 **マニフェスト相当の構成で動きます。** `deploy/base/deployment.yaml` と同じ条件 — read-only root filesystem、全 capability drop、`runAsUser` を固定せず任意に選んだ UID を与える、ConfigMap 相当を `/etc/rh-sc-mcp/config.yaml` にマウントし `--config` で渡す — で次を確認しました。
 
@@ -931,11 +931,47 @@ spellcheck:     {}
 | 起動ログ | HTTP 有効化の警告が出る。token の出力なし |
 | `SIGTERM` での停止 | `shutting down` を記録して終了コード `0`。`podman stop` も同じで、既定の 10 秒待ちを使い切らない |
 
-これで[コンテナと Kubernetes / OpenShift](#コンテナと-kubernetes--openshift) に書いた「割り当てられた UID に依存しない」という記述は、設計意図だけでなく 1 件の実測に裏付けられたことになります。**検証したのは UID 1000650000 の 1 値だけ**で、OpenShift が割り当てうる範囲を網羅したわけではありません。
+この UID は任意に選んだ 1 値です。クラスタが実際に割り当てた UID での確認は後述します。
 
 **今回のアイドル状態での停止は SIGTERM で完結しました。** `podman kill --signal TERM` を送ると、プロセスは `shutting down` を記録して終了コード `0` で終わります。`podman stop` でも終了コードは `0` で、コマンドが戻るまで 0.373 秒 — 既定の 10 秒待ちを使い切らず、SIGKILL への昇格には至っていません。
 
 ただし**計測時に処理中のリクエストはありませんでした**。HTTP サーバーは SIGTERM を受けたあと処理中の HTTP リクエストの終了を最大 20 秒待つ設計ですが、その待ち時間そのものを負荷をかけた状態で測ってはいません。上の数値は「捌くものが何も無いときの停止」です。
+
+**OpenShift 実クラスタでも動きました。** 単一の amd64 ノード (Ready) を持つクラスタに専用 namespace を切り、`deploy/overlays/openshift` を適用しました。マニフェストから変えたのは `image` をクラスタ内部レジストリの検証ビルド (linux/amd64) に差し替えた 1 点だけです。資格情報は dummy の offline token とランダム生成の共有 HTTP token で、**実 Red Hat API は一度も呼んでいません** (当然、書き込みもしていません)。
+
+| 確認項目 | 結果 |
+|---|---|
+| Pod | `replicas: 2` の両方が Ready |
+| SCC | `restricted-v2` |
+| 割り当て UID | `1000980000` — クラスタが選んだ値で、こちらからは指定していない |
+| `readOnlyRootFilesystem` | `true` |
+| `/healthz` / `/readyz` (port-forward) | どちらも `200` |
+| `POST /mcp` token なし (port-forward) | `401` |
+| `initialize` token あり (port-forward) | `200`、`serverInfo.name` は `rh-sc-mcp` |
+| `tools/list` token あり (port-forward) | `200`。read-only の 5 ツール (`rhcase_scope` / `rhcase_search` / `rhcase_get` / `rhcase_list_comments` / `rhcase_get_comment`) |
+| `Route` 経由 (token なし / あり) | `401` / `initialize` が `200` |
+
+[コンテナと Kubernetes / OpenShift](#コンテナと-kubernetes--openshift) に書いた「割り当てられた UID に依存しない」という設計は、**Podman の 1000650000 とクラスタが割り当てた 1000980000 の 2 値で、意図どおり動くことを確認**しました。2 サンプルなので「どの UID でも動く」ことの証明にはなりません — `restricted-v2` が割り当てうるレンジは namespace ごとに異なり、そのごく一部を踏んだだけです。根拠は依然として「特定 UID とファイル所有権に依存しない作りにしてある」という設計のほうで、実測はそれと矛盾しなかった、という位置づけです。
+
+**`Route` の TLS は確認していません。** Route のクラスタ証明書をローカルの信頼ストアで検証できず、`curl -k` で確認しました。上の `Route` 行が示すのは「Route を通して HTTP のやりとりが成立する」ところまでで、**利用者から見た TLS の信頼性は保証していません**。公開する際は証明書の経路をご自身で確認してください。
+
+**ノードのアーキテクチャを明示してください。** 最初に arm64 のイメージを amd64 ノードへ載せてしまい、Pod が `Exec format error` で起動しませんでした。`Dockerfile` は `TARGETOS` / `TARGETARCH` を見てクロスコンパイルしますが、これらが渡らないとビルドホストのアーキテクチャのまま出てきます。arm64 のマシンから amd64 ノード向けに作り直したときは、次のように明示して通りました。
+
+```bash
+podman build --platform linux/amd64 \
+  --build-arg BUILDPLATFORM=linux/arm64 \
+  --build-arg TARGETOS=linux \
+  --build-arg TARGETARCH=amd64 \
+  -t <registry>/<namespace>/rh-sc-mcp:<tag> .
+```
+
+`--platform` が最終イメージのアーキテクチャを決め、`TARGETOS` / `TARGETARCH` がビルドステージの `go build` に渡ります。**`--platform` を省くと最終イメージが arm64 のまま出ることがあり、`Exec format error` が再発します**。`BUILDPLATFORM` はビルドするマシン側の値です。ビルド後は次で確かめてください — 実際に `linux/amd64` が返ることを確認しています。
+
+```bash
+podman image inspect <image> --format '{{.Os}}/{{.Architecture}}'
+```
+
+**実クラスタでの停止と drain は未検証です。** 上の SIGTERM の計測は Podman 単体のもので、Pod の削除や rolling update で同じように振る舞うかは確認していません。
 
 **制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
 
@@ -1099,7 +1135,7 @@ gh api repos/<owner>/<repo>/actions/permissions/workflow
 |---|---|
 | linux / darwin × amd64 / arm64 | `rh-sc-mcp_<os>_<arch>.tar.gz` を Release に添付 |
 | windows | **配布しません** |
-| コンテナイメージ | **配布しません** ([制限事項 7](#7-コンテナは-podman-で検証済み-docker-自体では未実行)) |
+| コンテナイメージ | **配布しません** ([制限事項 7](#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行)) |
 
 Windows を外しているのは、このサーバーを Windows で動かしたことが一度も無いためです。バイナリを配ると「動くはず」という暗黙の主張になります。Windows で使う場合はソースからビルドしてください。
 
