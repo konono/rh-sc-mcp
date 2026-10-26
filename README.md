@@ -66,7 +66,7 @@ resources:
 
 HTTP ではサーバーを常駐させ、クライアントは `/mcp` に接続します。接続には **offline token とは別の共有 bearer token** が必要です。各クライアントの HTTP 登録例は [MCP クライアント一覧](docs/clients.md)、起動と保護の設定は [HTTP サーバーの運用](docs/http.md) を参照してください。
 
-コンテナイメージはリリース時に `ghcr.io/konono/rh-sc-mcp` へ公開する構成です。利用できるタグと Kubernetes / OpenShift への配置手順は[デプロイガイド](docs/deployment.md)を参照してください。イメージはサーバーを起動するためのもので、Red Hat の offline token と HTTP 用 token は起動時に別途渡します。
+公開イメージ `ghcr.io/konono/rh-sc-mcp:v0.5.0` を利用できます (linux/amd64・linux/arm64)。Kubernetes / OpenShift への配置手順は[デプロイガイド](docs/deployment.md)を参照してください。Red Hat の offline token と HTTP 用 token は起動時に別途渡します。
 
 ## 更新と削除
 

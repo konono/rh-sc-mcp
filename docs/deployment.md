@@ -6,10 +6,10 @@
 
 ## コンテナと Kubernetes / OpenShift
 
-リリース時に `ghcr.io/konono/rh-sc-mcp:<release-tag>` と `:latest` を linux/amd64・linux/arm64 の両方で作成します。**デプロイには版を固定したタグ** (例 `v0.5.0`) を指定してください。初回公開後に GitHub Packages 側で package の visibility を Public にする必要があります。利用前に[パッケージページ](https://github.com/users/konono/packages/container/package/rh-sc-mcp)で公開状態を確認してください。
+公開イメージは `ghcr.io/konono/rh-sc-mcp:v0.5.0` です。linux/amd64・linux/arm64 の両方を含み、認証なしの pull と arm64 イメージの `--version` を確認しました。`latest` もありますが、**デプロイには版を固定したタグ**を指定してください。[パッケージページ](https://github.com/users/konono/packages/container/package/rh-sc-mcp)は Public です。
 
 ```bash
-podman pull ghcr.io/konono/rh-sc-mcp:<release-tag>
+podman pull ghcr.io/konono/rh-sc-mcp:v0.5.0
 ```
 
 イメージには credential や設定ファイルを含めていません。起動時に `--config` で設定ファイルをマウントし、Red Hat の offline token と別の共有 HTTP token を Secret から環境変数で渡します。OpenShift では後述の `make deploy` がこの Secret を作ります。
@@ -23,7 +23,7 @@ podman pull ghcr.io/konono/rh-sc-mcp:<release-tag>
 ```yaml
 images:
   - name: ghcr.io/konono/rh-sc-mcp              # 照合キー。触らない
-    newTag: <release-tag>
+    newTag: v0.5.0
 ```
 
 適用前に、置換後のイメージを目で確認してください。
@@ -31,7 +31,7 @@ images:
 ```bash
 kubectl kustomize deploy/overlays/kubernetes | grep 'image:'
 kubectl kustomize deploy/overlays/openshift  | grep 'image:'
-# → image: ghcr.io/konono/rh-sc-mcp:<release-tag>
+# → image: ghcr.io/konono/rh-sc-mcp:v0.5.0
 ```
 
 指定したタグに変わらない場合は、`name` を書き換えて照合が外れていないか確認してください。
@@ -79,7 +79,7 @@ kubectl kustomize deploy/overlays/openshift
 
 ### OpenShift
 
-`Route` は `host` を省いているのでクラスタが生成し、`termination: edge` がルーターの既定証明書を使います。追加の編集は不要です。ただしその既定証明書を MCP クライアント側が信頼できるかは別問題で、検証時はローカルの信頼ストアで検証できませんでした ([制限事項 7](limitations.md#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行))。
+`Route` は `host` を省いているのでクラスタが生成し、`termination: edge` がルーターの既定証明書を使います。追加の編集は不要です。ただしその既定証明書を MCP クライアント側が信頼できるかは別問題で、検証時はローカルの信頼ストアで検証できませんでした ([制限事項 7](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み))。
 
 ```bash
 oc apply -k deploy/overlays/openshift
@@ -93,10 +93,10 @@ oc apply -k deploy/overlays/openshift
 
 ```bash
 # 1. 何が適用されるかを見る (クラスタは変更しない)
-make deploy-plan NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:<release-tag>
+make deploy-plan NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:v0.5.0
 
 # 2. 適用 (ビルドと push は不要)
-make deploy NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:<release-tag>
+make deploy NAMESPACE=rh-sc-mcp IMAGE=ghcr.io/konono/rh-sc-mcp:v0.5.0
 
 # 3. 状態と Route URL
 make deploy-status NAMESPACE=rh-sc-mcp
@@ -142,9 +142,9 @@ kubectl apply -k deploy/overlays/kubernetes
 
 マニフェストは、コンテナを非 root・read-only root filesystem・全 capability drop・`RuntimeDefault` seccomp で動かす設定にしています。イメージは `USER 65532:65532` を宣言しています (マニフェストの `runAsNonRoot` が数値の UID を必要とするため)。一方 OpenShift の `restricted-v2` SCC は namespace のレンジから任意の UID を割り当て、イメージの `USER` を無視します。
 
-**割り当てられた UID に依存しないよう、特定 UID やファイル所有権への依存を避けてあります** — バイナリは誰でも読める配置に置いてあり、**この構成ではマウントした設定を `--config` で読むだけで、起動時にファイルを書きません**。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。これは設計意図にとどまりません。**任意に選んだ UID 1000650000 で、read-only root filesystem + 全 capability drop のもと実際に動くことを Podman で確認**し、さらに **OpenShift 実クラスタで `restricted-v2` が割り当てた UID 1000980000 でも Pod が Ready になることを確認**しました ([制限事項 7](limitations.md#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行))。確認したのはこの 2 つの UID で、全 UID を試したわけではありません。
+**割り当てられた UID に依存しないよう、特定 UID やファイル所有権への依存を避けてあります** — バイナリは誰でも読める配置に置いてあり、**この構成ではマウントした設定を `--config` で読むだけで、起動時にファイルを書きません**。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。これは設計意図にとどまりません。**任意に選んだ UID 1000650000 で、read-only root filesystem + 全 capability drop のもと実際に動くことを Podman で確認**し、さらに **OpenShift 実クラスタで `restricted-v2` が割り当てた UID 1000980000 でも Pod が Ready になることを確認**しました ([制限事項 7](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み))。確認したのはこの 2 つの UID で、全 UID を試したわけではありません。
 
-書き込みが起きないのは `--config` を渡しているからです。これを省くと既定の設定ファイルを作ろうとして `$HOME` に書き込みます。マニフェストは `args` で常に渡すので該当しませんが、`CMD` を置き換える場合は[制限事項 7](limitations.md#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行) を参照してください。
+書き込みが起きないのは `--config` を渡しているからです。これを省くと既定の設定ファイルを作ろうとして `$HOME` に書き込みます。マニフェストは `args` で常に渡すので該当しませんが、`CMD` を置き換える場合は[制限事項 7](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み) を参照してください。
 
 OpenShift overlay の `Route` には 300 秒の HAProxy タイムアウトを付けています。streamed な MCP 応答は開いたままになるため、ルーターの既定 30 秒では切られます。Kubernetes overlay は代わりに `Ingress` を置きます。どちらも公開するのは `/mcp` だけで、プローブはクラスタ内に留めます。
 
