@@ -197,7 +197,7 @@ podman image inspect <image> --format '{{.Os}}/{{.Architecture}}'
 
 **制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
 
-なお、イメージは公開していません ([配布物](development.md#配布物) 参照)。
+リリース用の GitHub Actions で build したイメージの実行は、初回公開後に確認します。上記の実測はローカルで Podman により作成したイメージに対するものです。
 
 ### 8. severity / status / product の値は検証しない
 

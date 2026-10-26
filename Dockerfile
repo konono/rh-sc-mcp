@@ -15,6 +15,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
+LABEL org.opencontainers.image.source="https://github.com/konono/rh-sc-mcp"
+
 # OpenShift assigns an arbitrary UID from the namespace range and ignores
 # the image's USER, so nothing may depend on a particular uid. The binary
 # is world-readable, and with the CMD below the process only reads the

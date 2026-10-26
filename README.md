@@ -37,7 +37,19 @@ export RH_SC_OFFLINE_TOKEN='xxxxxxxxx'
 
 このシェルから登録したクライアントを起動し、MCP サーバー `rh-sc` が見えることを確認します。最初は「`rhcase_scope` を使って、利用可能な操作を教えて」と依頼できます。ケースを探すときは `rhcase_search` に検索語などの条件を渡してください。**条件なしの検索は API に拒否されるため、本サーバーも送信前に止めます。** GUI アプリでは起動方法によってシェルの環境変数を受け継がないことがあるため、その場合は [サーバーの設定ファイル](docs/configuration.md)に token を設定してください。
 
-token を毎回入力したくない場合は、既定の `~/.config/rh-sc-mcp/config.yaml` に `offlineToken` を設定する方法もあります。ファイルは初回起動時に `0600` で作られます。環境変数と設定ファイルを併用した場合は、環境変数が優先されます。詳しくは [設定と権限](docs/configuration.md) を参照してください。
+### 設定ファイル
+
+既定の場所は `~/.config/rh-sc-mcp/config.yaml` です。初回起動時にディレクトリ (`0700`) と最小構成のファイル (`0600`) が自動作成されます。例えば、token をファイルに保存し、KCS 検索も有効にする場合は次のように書きます。
+
+```yaml
+offlineToken: "ここに Red Hat offline token"
+readOnly: true
+resources:
+  kcs:
+    permission: read
+```
+
+`offlineToken` は環境変数 `RH_SC_OFFLINE_TOKEN` で渡すなら省略できます。**環境変数とファイルに同じ項目がある場合は環境変数を優先**し、他の設定はマージします。別のファイルを使う場合は `--config /path/to/config.yaml` を指定してください。全項目と権限の設定例は[設定と権限](docs/configuration.md)にあります。
 
 ## 使える機能
 
@@ -54,7 +66,7 @@ token を毎回入力したくない場合は、既定の `~/.config/rh-sc-mcp/c
 
 HTTP ではサーバーを常駐させ、クライアントは `/mcp` に接続します。接続には **offline token とは別の共有 bearer token** が必要です。各クライアントの HTTP 登録例は [MCP クライアント一覧](docs/clients.md)、起動と保護の設定は [HTTP サーバーの運用](docs/http.md) を参照してください。
 
-コンテナ、Kubernetes、OpenShift の手順と `make deploy-*` は [デプロイガイド](docs/deployment.md) にまとめています。**コンテナイメージは配布していません**。利用するレジストリ向けにビルドしてください。
+コンテナイメージはリリース時に `ghcr.io/konono/rh-sc-mcp` へ公開する構成です。利用できるタグと Kubernetes / OpenShift への配置手順は[デプロイガイド](docs/deployment.md)を参照してください。イメージはサーバーを起動するためのもので、Red Hat の offline token と HTTP 用 token は起動時に別途渡します。
 
 ## 更新と削除
 

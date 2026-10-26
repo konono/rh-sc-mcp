@@ -77,15 +77,18 @@ ok  github.com/konono/rh-sc-mcp/internal/server
 ---
 ## リリース
 
-リリースは **release-please + GoReleaser** で自動化しています ([konono/aw](https://github.com/konono/aw) と同じ構成)。
+リリースは **release-please + GoReleaser + GHCR イメージ公開**で自動化しています ([konono/aw](https://github.com/konono/aw) の公開方式を参考)。
 
 ```
 main への push
   └─ release-please: conventional commits を読み、リリース PR を更新
        └─ その PR をマージ
             ├─ タグ・GitHub Release・CHANGELOG を作成
-            └─ GoReleaser: バイナリを Release に添付
+            ├─ GoReleaser: バイナリを Release に添付
+            └─ Buildx: GHCR に linux/amd64・linux/arm64 のイメージを push
 ```
+
+初回公開時、GHCR の package は既定で private です。一般利用者がログインせず pull できるようにするには、package の設定画面で visibility を **Public** に変更し、認証なしの `podman pull` で確認します。GitHub Release が公開されたことだけでは、イメージの公開まで確認できたことにはなりません。過去のタグを再ビルドする場合は `Publish container image` ワークフローを手動実行できます。手動実行では `latest` を既定で動かしません。
 
 現在のバージョンは 2 箇所にあります — `.release-please-manifest.json` と `internal/version/version.go` です。前者が release-please にとっての記録で、後者は `release-please-config.json` の `extra-files` に登録された派生先です。リリースのたびに release-please が**両方をまとめて更新**するので、手で書き換える必要はありません。
 
@@ -136,7 +139,7 @@ gh api repos/<owner>/<repo>/actions/permissions/workflow
 |---|---|
 | linux / darwin × amd64 / arm64 | `rh-sc-mcp_<os>_<arch>.tar.gz` を Release に添付 |
 | windows | **配布しません** |
-| コンテナイメージ | **配布しません** ([制限事項 7](limitations.md#7-コンテナは-podman-と-openshift-実クラスタで検証済み-docker-自体では未実行)) |
+| コンテナイメージ | GHCR に linux/amd64・linux/arm64 をリリースタグと `latest` で公開 ([デプロイ手順](deployment.md)) |
 
 Windows を外しているのは、このサーバーを Windows で動かしたことが一度も無いためです。バイナリを配ると「動くはず」という暗黙の主張になります。Windows で使う場合はソースからビルドしてください。
 
