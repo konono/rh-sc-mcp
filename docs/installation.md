@@ -4,32 +4,13 @@
 
 ## インストールと更新
 
-公開版は `go install` でインストールします。
-
-```bash
-go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest
-
-# GOBIN があればそこ、無ければ GOPATH/bin に入る
-GO_BIN_PATH="$(go env GOBIN)"
-# GOPATH は複数要素を持てる。go install が書くのは先頭要素なので、そこだけ取る
-if [ -z "$GO_BIN_PATH" ]; then GO_BIN_PATH="$(go env GOPATH | cut -d: -f1)/bin"; fi
-"$GO_BIN_PATH/rh-sc-mcp" --version
-
-# 以下の例で rh-sc-mcp とだけ入力できるようにする
-export PATH="$GO_BIN_PATH:$PATH"
-```
-
-`go install ...@latest` は公開済み Go モジュールの最新タグから取得します。保存先は `GOBIN` が設定されていればそこ、無ければ **`GOPATH` の先頭要素**の `bin/` です (`GOPATH` はリスト形式を取れますが、`go install` が書くのは先頭だけです)。Claude Code に登録するときは、後述のとおり**この絶対パス**を指定します。
-
-**Go ツールチェーンが必要です。** インストールも更新も `go install` に統一しているため、Go 1.25 以降が入っていない環境では利用できません。旧 `INSTALL_DIR` は使えず、保存先を変える場合は `GOBIN` を指定してください。
-
-### `install.sh` を使う場合
-
-以前から公開している `install.sh` の URL も使えます。`go install` を実行したうえで、**Claude Code があれば MCP サーバーの登録まで行います**。
+通常は `install.sh` を使います。スクリプトは `go install` でバイナリを配置し、Claude Code が見つかれば MCP サーバーも登録します。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | sh
 ```
+
+**Go 1.25 以降が必要です。** インストーラも更新コマンドも `go install` を使います。旧 `INSTALL_DIR` は使えず、保存先を変える場合は `GOBIN` を指定してください。
 
 | 状況 | 振る舞い |
 |---|---|
@@ -46,6 +27,24 @@ curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | 
 **offline token は Claude Code の設定に書き込みません。** 登録に含めるのはバイナリの絶対パスだけで、token は Claude Code を起動したプロセスの環境、または本サーバー自身の設定ファイルから渡します。
 
 Claude Code の登録に失敗しても、`go install` の成否とは分けて報告します。インストールが済んでいれば、登録だけ後から手動で行えます。
+
+### `go install` で手動インストールする場合
+
+インストーラを使わず、バイナリだけを入れることもできます。この方法では MCP クライアントへの登録は行いません。
+
+```bash
+go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest
+
+# GOBIN があればそこ、無ければ GOPATH の先頭要素の bin/ に入る
+GO_BIN_PATH="$(go env GOBIN)"
+if [ -z "$GO_BIN_PATH" ]; then GO_BIN_PATH="$(go env GOPATH | cut -d: -f1)/bin"; fi
+"$GO_BIN_PATH/rh-sc-mcp" --version
+
+# 以下の例で rh-sc-mcp とだけ入力できるようにする
+export PATH="$GO_BIN_PATH:$PATH"
+```
+
+`go install ...@latest` は公開済み Go モジュールの最新タグから取得します。`GOPATH` は複数要素を持てますが、`go install` が書くのは先頭要素です。MCP クライアントには、このバイナリの絶対パスを登録してください。
 
 以後の更新は、インストール済みのコマンドで行えます。
 
