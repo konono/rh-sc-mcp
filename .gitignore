@@ -10,6 +10,11 @@ dist/
 # Local panecom pane/session state, not part of the project.
 .panecom/
 
+# Per-session work journals written by the tracecraft skill. They record
+# one author's investigation, not the project's state, and may quote
+# command output from a local environment.
+.tracecraft/
+
 # The operator's own configuration holds an offline token. Only the
 # example is tracked.
 #
