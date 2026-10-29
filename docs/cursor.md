@@ -1,12 +1,14 @@
-# Cursor で使う
+# Using it with Cursor
 
-[使い始める](../README.md) · [クライアント一覧](clients.md)
+**English** · [日本語](ja/cursor.md)
 
-Cursor はプロジェクトの `.cursor/mcp.json` とユーザー共通の `~/.cursor/mcp.json` を読みます。同名が両方にあるとプロジェクト側が優先されます。以下の例は既存の `mcpServers` に `rh-sc` を追加する形です。[Cursor 公式 MCP ガイド](https://prod.cursor.com/docs/mcp)
+[Get started](../README.md) · [MCP clients](clients.md)
+
+Cursor reads both the project's `.cursor/mcp.json` and the user-wide `~/.cursor/mcp.json`. If the same name appears in both, the project one wins. The examples below add `rh-sc` to an existing `mcpServers` object. [Official Cursor MCP guide](https://prod.cursor.com/docs/mcp)
 
 ## stdio
 
-`/absolute/path/to/rh-sc-mcp` を `go install` の実際の保存先に置き換えてください。
+Replace `/absolute/path/to/rh-sc-mcp` with where `go install` actually put the binary.
 
 ```json
 {
@@ -20,11 +22,11 @@ Cursor はプロジェクトの `.cursor/mcp.json` とユーザー共通の `~/.
 }
 ```
 
-パスは `go env GOBIN`、未設定なら `go env GOPATH` の先頭要素の `bin/rh-sc-mcp` です。offline token の実値は `mcp.json` に書かず、Cursor の起動環境に `RH_SC_OFFLINE_TOKEN` を渡すか、サーバー側の `~/.config/rh-sc-mcp/config.yaml` に設定します。GUI から起動した Cursor がシェルの環境変数を受け継ぐとは限らないため、後者のほうが確実です。
+The path is `bin/rh-sc-mcp` under `go env GOBIN`, or under the first element of `go env GOPATH` if `GOBIN` is unset. Do not put the real offline token in `mcp.json`; either pass `RH_SC_OFFLINE_TOKEN` through Cursor's launch environment, or set it in the server's `~/.config/rh-sc-mcp/config.yaml`. A Cursor started from a GUI does not necessarily inherit your shell's environment variables, so the latter is more reliable.
 
 ## Streamable HTTP
 
-サーバーを [HTTP で起動](http.md)し、次のように登録します。Cursor は `headers` 内の `${env:NAME}` を環境変数から展開します。
+[Start the server over HTTP](http.md) and register it like this. Cursor expands `${env:NAME}` inside `headers` from environment variables.
 
 ```json
 {
@@ -39,4 +41,4 @@ Cursor はプロジェクトの `.cursor/mcp.json` とユーザー共通の `~/.
 }
 ```
 
-共有 token の実値は `mcp.json` に保存せず、**Cursor のプロセスが読める環境**に渡します。リモートでは HTTPS を使います。登録後は Cursor を再起動し、**Customize → MCPs** で接続を確認してください。Cursor Agent はツールを使う前に承認を求める場合があります。offline token は HTTP サーバー側だけに置きます。
+Do not store the real shared token in `mcp.json`; pass it through **an environment the Cursor process can read**. Use HTTPS for remote servers. After registering, restart Cursor and confirm the connection under **Customize → MCPs**. Cursor Agent may ask for approval before using a tool. The offline token stays on the HTTP server side only.

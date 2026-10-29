@@ -1,52 +1,54 @@
-# 設定と権限
+# Configuration and permissions
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/configuration.md)
 
-## 設定
+[Get started](../README.md) · [Documentation index](README.md)
 
-設定は YAML ファイルと環境変数で行います。設定ファイルの既定パスは `~/.config/rh-sc-mcp/config.yaml` です。`--config`、`RH_SC_MCP_CONFIG`、既定パスの順にファイルを選びます。設定ファイルと環境変数はキー単位でマージし、**両方にあるキーは環境変数が優先**、ファイルにしかないキーはそのまま使います。
+## Configuration
 
-`--config` と `RH_SC_MCP_CONFIG` を指定せずに初めて起動すると、既定パスのディレクトリ (権限 `0700`) と最小構成の設定ファイル (権限 `0600`) を作ります。既存ファイルは上書きしません。生成内容は `readOnly: true` と説明コメントだけで、認証情報は含みません。offline token が未設定なら、ファイルを作った後に起動はエラーで止まります。
+Configuration comes from a YAML file and from environment variables. The default path of the configuration file is `~/.config/rh-sc-mcp/config.yaml`. The file is chosen in the order `--config`, `RH_SC_MCP_CONFIG`, default path. The file and the environment are merged per key: **a key present in both is taken from the environment**, and keys that exist only in the file are used as written.
+
+On the first run without `--config` or `RH_SC_MCP_CONFIG`, the directory at the default path (mode `0700`) and a minimal configuration file (mode `0600`) are created. An existing file is never overwritten. What is generated is just `readOnly: true` plus explanatory comments; it contains no credentials. If no offline token is configured, the server creates the file and then stops with an error.
 
 ```bash
-# 初回は設定ファイルを生成。token 未設定なら案内を表示して終了
+# The first run generates the configuration file. Without a token it prints guidance and exits
 rh-sc-mcp --print-scope
 $EDITOR "$HOME/.config/rh-sc-mcp/config.yaml"
 ```
 
-[設定例](../config.example.yaml)に全キーの説明があります。**必須なのは offline token だけ** で、それ以外のキーはすべて省略可能です (省略時は既定値)。offline token は生成したファイルに `offlineToken:` として追加するか、環境変数 `$RH_SC_OFFLINE_TOKEN` で渡します。後者なら認証情報をファイルに保存せずに済みます。明示した `--config` または `RH_SC_MCP_CONFIG` のファイルが無い場合はエラーになり、既定ファイルは作りません。
+Every key is documented in [the example configuration](../config.example.yaml). **The offline token is the only required setting**; every other key is optional and falls back to its default. Add the offline token to the generated file as `offlineToken:`, or pass it through the environment variable `$RH_SC_OFFLINE_TOKEN` — the latter keeps credentials out of the file entirely. If a file explicitly named by `--config` or `RH_SC_MCP_CONFIG` does not exist, that is an error; the default file is not created in that case.
 
-最小構成 (環境変数で token を渡し、生成した設定ファイルを使う) では、公開エンドポイントに対する read-only サーバーになります。
+The minimal setup — token in the environment, generated configuration file — gives you a read-only server pointed at the public endpoint.
 
 ```bash
 RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 ```
 
-### 主要なキー
+### Main keys
 
-| キー | 既定値 | 説明 |
+| Key | Default | Description |
 |---|---|---|
-| `offlineToken` | (必須) | Red Hat API offline token。環境変数推奨 |
-| `baseURL` | `https://api.access.redhat.com/support` | ケース API のルート (basePath 込み) |
-| `apiVersion` | `v3` | ケース API のメジャーバージョン (`v3` / `v1`) |
-| `ssoTokenURL` | `https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token` | トークン交換先 |
-| `ssoClientID` | `rhsm-api` | トークン交換の client_id |
-| `readOnly` | `true` | 全体キルスイッチ。true の間はすべて read に丸められる |
-| `defaultPermission` | (リソース既定) | `resources` に明示がないリソースの既定レベル |
-| `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`=`none` | リソースごとの `none` / `read` / `write` |
-| `caseViewURL` | (なし) | 人間向けリンクの接頭辞。未設定なら `caseUrl` を出力しない |
-| `maxResults` | `50` | 検索 1 回あたりのケース数上限 (API 側上限は 200) |
-| `http.addr` | (なし) | HTTP の待受アドレス。空なら HTTP 無効 (既定 OFF) |
-| `http.token` | (なし) | 共有 bearer token。`http.addr` 設定時は必須、offline token と同値は不可 |
-| `http.stateless` | `true` | セッションを持たない。複数レプリカ運用の既定 |
-| `http.sessionTimeoutSeconds` | `0` | stateful 時のみ有効 |
-| `http.trustedOrigins` | `[]` | cross-origin チェックで追加許可する Origin |
-| `maxComments` | `50` | コメント一覧の件数上限 (クライアント側で切り詰め) |
-| `timeoutSeconds` | `60` | 上流 HTTP 1 回あたりの制限時間 |
+| `offlineToken` | (required) | Red Hat API offline token. The environment variable is recommended |
+| `baseURL` | `https://api.access.redhat.com/support` | Root of the case API (including basePath) |
+| `apiVersion` | `v3` | Major version of the case API (`v3` / `v1`) |
+| `ssoTokenURL` | `https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token` | Token exchange endpoint |
+| `ssoClientID` | `rhsm-api` | client_id for the token exchange |
+| `readOnly` | `true` | Global kill switch. While true, everything is reduced to read |
+| `defaultPermission` | (per-resource default) | Default level for resources not named in `resources` |
+| `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`=`none` | Per-resource `none` / `read` / `write` |
+| `caseViewURL` | (none) | Prefix for human-facing links. When unset, `caseUrl` is not emitted |
+| `maxResults` | `50` | Maximum cases per search (the API's own cap is 200) |
+| `http.addr` | (none) | HTTP listen address. Empty means HTTP is disabled (off by default) |
+| `http.token` | (none) | Shared bearer token. Required when `http.addr` is set, and must differ from the offline token |
+| `http.stateless` | `true` | Hold no session. The default for running multiple replicas |
+| `http.sessionTimeoutSeconds` | `0` | Only meaningful when stateful |
+| `http.trustedOrigins` | `[]` | Extra origins allowed by the cross-origin check |
+| `maxComments` | `50` | Maximum comments in a listing (truncated client-side) |
+| `timeoutSeconds` | `60` | Time limit for a single upstream HTTP call |
 
-### 環境変数
+### Environment variables
 
-| 環境変数 | 対応するキー |
+| Environment variable | Corresponding key |
 |---|---|
 | `RH_SC_OFFLINE_TOKEN` | `offlineToken` |
 | `RH_SC_BASE_URL` | `baseURL` |
@@ -54,29 +56,29 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 | `RH_SC_SSO_TOKEN_URL` | `ssoTokenURL` |
 | `RH_SC_SSO_CLIENT_ID` | `ssoClientID` |
 | `RH_SC_READ_ONLY` | `readOnly` (`true`/`false`) |
-| `RH_SC_MCP_CONFIG` | 設定ファイルのパス (`--config` が優先。未指定なら `~/.config/rh-sc-mcp/config.yaml`) |
+| `RH_SC_MCP_CONFIG` | Path to the configuration file (`--config` wins; otherwise `~/.config/rh-sc-mcp/config.yaml`) |
 | `RH_SC_MCP_HTTP_ADDR` | `http.addr` |
 | `RH_SC_MCP_HTTP_TOKEN` | `http.token` |
 
-### 権限モデル
+### Permission model
 
-リソースは 3 つ、レベルは `none` < `read` < `write` の 3 段階です。
+There are three resources and three levels, ordered `none` < `read` < `write`.
 
-| リソース | 既定 | 対象ツール |
+| Resource | Default | Tools it covers |
 |---|---|---|
-| `case` | `read` | `rhcase_search` / `rhcase_get` (read)、`rhcase_create` / `rhcase_update` (write) |
-| `comment` | `read` | `rhcase_list_comments` / `rhcase_get_comment` (read)、`rhcase_add_comment` (write) |
+| `case` | `read` | `rhcase_search` / `rhcase_get` (read), `rhcase_create` / `rhcase_update` (write) |
+| `comment` | `read` | `rhcase_list_comments` / `rhcase_get_comment` (read), `rhcase_add_comment` (write) |
 | `kcs` | `none` | `rhkcs_search` (read) |
 
-ポイントが 3 つあります。
+Three things are worth knowing.
 
-- **`case` と `comment` は独立しています。** `comment: write` + `case: read` と書けば、「エージェントに返信はさせるが、ステータスや severity は変えさせない」構成になります。
-- **`kcs` は明示しない限り有効になりません。** `defaultPermission: write` にしても `none` のままです。ケース管理とは別の API 面なので、「ケースを読みたい」という設定が暗黙にナレッジベース検索を有効化しないようにしています。
-- **`readOnly: true` の間は write 付与が無視されます。** 設定を一時的に絞るときに、個別の権限行を消して回る必要がありません。
+- **`case` and `comment` are independent.** Writing `comment: write` + `case: read` gives you "let the agent reply, but don't let it change status or severity".
+- **`kcs` is never enabled unless you say so explicitly.** Even `defaultPermission: write` leaves it at `none`. It is a different API surface from case management, so "I want to read cases" must not implicitly turn on knowledge base search.
+- **While `readOnly: true`, any granted write is ignored.** That way you can tighten things temporarily without going around deleting individual permission lines.
 
-### 設定の確認
+### Checking the configuration
 
-実際に何が有効になっているかは、起動せずに確認できます。
+You can see what is actually in effect without starting the server.
 
 ```bash
 rh-sc-mcp --print-scope
@@ -98,11 +100,11 @@ rh-sc-mcp --print-scope
 }
 ```
 
-この出力に認証情報は一切含まれません (fingerprint も出しません)。バグ報告にそのまま貼れます。
+This output contains no credentials at all (not even a fingerprint). You can paste it straight into a bug report.
 
-### 疎通確認 (`--check-auth`)
+### Connectivity check (`--check-auth`)
 
-offline token が通るかどうかは、セッションを開始せずに確認できます。
+You can find out whether the offline token works without starting a session.
 
 ```bash
 rh-sc-mcp --check-auth
@@ -118,30 +120,30 @@ rh-sc-mcp --check-auth
 }
 ```
 
-2 段階を**別々に報告します**。原因も対処も違うためです。
+The two stages are **reported separately**, because their causes and their fixes differ.
 
-- `tokenExchange` — SSO が offline token を受理したか。失敗した場合、SSO は原因を区別せず `invalid_grant` を返すため、値そのものを確認する必要があります。
-- `apiProbe` — 発行された access token を API が受理したか。SSO は通るのに API が `403` を返すのは、アカウントの可視範囲の問題。
+- `tokenExchange` — whether SSO accepted the offline token. On failure, SSO returns `invalid_grant` without distinguishing the cause, so you have to check the value itself.
+- `apiProbe` — whether the API accepted the issued access token. SSO succeeding while the API returns `403` points to the account's visibility, not the token.
 
-**`apiProbe: ok` はケースを取得できることまでは示しません。** 確かめているのは「この資格情報で検索リクエストが受理される」ことだけです。実際に `apiVersion: v1` では、両方 `ok` になる一方で個々のケースの取得は `404` になります ([制限事項 4](limitations.md#4-apiversion-v1-では同じケースを取得できませんでした))。取得まで確認したい場合は `rhcase_get` に既知のケース番号を渡してください。
+**`apiProbe: ok` does not mean cases can be fetched.** All it establishes is that a search request is accepted with these credentials. In fact, with `apiVersion: v1` both report `ok` while fetching individual cases returns `404` ([limitation 4](limitations.md#4-with-apiversion-v1-the-same-case-could-not-be-fetched)). To confirm fetching works, pass a known case number to `rhcase_get`.
 
-API 側のプローブは固定キーワードでの検索 1 回 (`maxResults: 1`) だけです。キーワードが必要なのは、API が**検索条件のないフィルタを拒否する**ためです ([制限事項 6](limitations.md#6-フィルタ検索は条件なしでは拒否される-仕様書に記載なし))。`case` が `none` の構成ではプローブ自体を省略し、その旨が `apiProbe` に入ります。
+The API-side probe is a single search with a fixed keyword (`maxResults: 1`). A keyword is needed because the API **rejects a filter with no search criteria** ([limitation 6](limitations.md#6-filter-search-is-rejected-without-criteria-not-documented-in-the-specification)). When `case` is `none`, the probe is skipped entirely and `apiProbe` says so.
 
-**この診断出力にケースの情報は入りません。** プローブは最大 1 件しか要求せず、かつ**応答本文を破棄します** — 見ているのはエラーの有無だけです。検索語が何かにマッチしたかどうかに関わらず、ケースのデータが出力に乗ることはありません。
+**No case information appears in this diagnostic output.** The probe asks for at most one result and **discards the response body** — all it looks at is whether there was an error. Whether or not the search term matched anything, case data never reaches the output.
 
-キーワード自体は、マッチする見込みが低くなるよう十分に固有な語を選んでいます (2026-10-25 の実行では 0 件でした)。ただしこれは**その時点のデータについての観測**であって語の性質ではなく、将来ケースにこの文字列が含まれる可能性は排除できません。出力の安全性が依存しているのは上記の「1 件上限 + 応答破棄」のほうです。
+The keyword itself was chosen to be distinctive enough that matching is unlikely (a run on 2026-10-25 returned zero results). But that is **an observation about the data at that time**, not a property of the word, and a case containing this string in the future cannot be ruled out. The safety of the output rests on the "cap at one result and discard the body" behaviour above.
 
-ケースの件数も報告しません。特定の検索語での件数は「見えるケース数」を意味しないためです。可視範囲を知りたい場合は `rhcase_search` を使ってください。
+Result counts are not reported either, because the count for a particular search term does not mean "the number of cases you can see". To learn your visible scope, use `rhcase_search`.
 
-失敗時は exit code 1 を返すのでヘルスチェックにも使えます。**出力に認証情報は含まれません** (上流がリクエストヘッダを反射してきた場合も洗浄されます)。
+On failure the exit code is 1, so this also works as a health check. **The output contains no credentials** (even if the upstream reflects the request headers back, they are scrubbed).
 
-token をファイルに置いている場合は、値をコマンドラインに出さず、末尾改行を落として渡してください。
+If you keep the token in a file, pass it without putting the value on the command line, and strip the trailing newline.
 
 ```bash
-chmod 600 token   # 置くなら最低限これ。token / *.token は .gitignore 済み
+chmod 600 token   # the bare minimum if you keep one. token / *.token are already in .gitignore
 RH_SC_OFFLINE_TOKEN="$(tr -d '\r\n' < token)" rh-sc-mcp --check-auth
 ```
 
-末尾改行の除去は必須です。改行が付いたままだと別の文字列を送ることになり、SSO は受理しません。そのときのエラーは原因を区別しないので、token 自体の問題との切り分けができなくなります。
+Stripping the trailing newline is mandatory. With the newline attached you are sending a different string, which SSO will not accept — and the resulting error does not distinguish causes, so you lose the ability to tell it apart from a problem with the token itself.
 
 ---

@@ -1,117 +1,121 @@
 # rh-sc-mcp configuration example
 #
-# offline token だけが必須で、それ以外のキーはすべて省略可能です (省略時は
-# 下記に書かれた既定値)。offline token も、環境変数 $RH_SC_OFFLINE_TOKEN で
-# 渡すならこのファイルには書かなくて構いません。どちらにも無い場合は起動時に
-# エラーになります。
+# The offline token is the only required setting; every other key is optional
+# and falls back to the default noted below. Even the offline token can be left
+# out of this file if you pass it through the environment variable
+# $RH_SC_OFFLINE_TOKEN. If it is in neither place, startup fails with an error.
 #
-# 不明なキーがあると起動時にエラーになります (permisson のような綴り間違いを
-# 黙って無視しないため)。
+# An unknown key is a startup error (so that a typo like "permisson" is not
+# silently ignored).
 #
-# 設定ファイルの既定パスは ~/.config/rh-sc-mcp/config.yaml です。
-# 初回起動時に最小構成のファイルが自動生成されます。全キーを確認したい場合は
-# この例を参照してください。既存の設定ファイルをコピーで上書きしないでください。
-# 実運用のファイルは offline token を含みうるため、リポジトリ内に置かず
-# 適切な権限で管理してください。
+# The default path of the configuration file is ~/.config/rh-sc-mcp/config.yaml.
+# A minimal file is generated automatically on the first run. Consult this
+# example when you want to see every key. Do not overwrite an existing
+# configuration file with a copy of this one. A real file may contain the
+# offline token, so keep it out of the repository and with suitable permissions.
 
 # ---------------------------------------------------------------------------
-# 認証
+# Authentication
 # ---------------------------------------------------------------------------
 
-# Red Hat API offline token。
-# 環境変数 $RH_SC_OFFLINE_TOKEN のほうが優先されます。secret store から渡せる
-# ので、可能なら環境変数を使い、このキーは書かないでください。
+# Red Hat API offline token.
+# The environment variable $RH_SC_OFFLINE_TOKEN takes precedence. It can be fed
+# from a secret store, so prefer the environment variable and leave this key out.
 # offlineToken: "eyJhbGciOi..."
 
-# SSO のトークン交換先。既定値は下記のとおりで、通常は変更不要です。
+# SSO token exchange endpoint. The defaults are below and rarely need changing.
 # ssoTokenURL: https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
 # ssoClientID: rhsm-api
 
 # ---------------------------------------------------------------------------
-# エンドポイント
+# Endpoint
 # ---------------------------------------------------------------------------
 
-# 公開 API 仕様 (Swagger 2.0, host api.access.redhat.com, basePath /support)
-# の既定値。別環境を向ける場合のみ変更します。既定以外にすると起動時に警告が
-# 出ます (レスポンス形状が保証されるのは公開エンドポイントだけのため)。
+# Default from the published API specification (Swagger 2.0, host
+# api.access.redhat.com, basePath /support). Change it only to point at another
+# environment. A non-default value produces a startup warning, because the
+# response shapes are only guaranteed for the public endpoint.
 # baseURL: https://api.access.redhat.com/support
 
-# ケース API のメジャーバージョン。v3 が現行で、本サーバーが検証している唯一の
-# バージョンです。v1 も仕様書に存在するため設定可能にしていますが、形状差異は
-# 検証していません。
+# Major version of the case API. v3 is current and the only version this server
+# has verified. v1 also exists in the specification so it is configurable, but
+# the differences in shape have not been verified.
 # apiVersion: v3
 
-# 人間向けリンクを組み立てるコンソール URL の接頭辞 (任意)。
-# ケース番号が最後のパスセグメントとして連結されます。
+# Optional prefix of the console URL used to build human-facing links.
+# The case number is appended as the last path segment.
 #   caseViewURL: https://example.invalid/cases
 #   → caseUrl: https://example.invalid/cases/04337263
 #
-# 既定値はありません。公開 API 仕様は Web コンソールの URL 体系について何も
-# 述べていないため、既定値を置くとこのサーバーが「確認していないリンク」を
-# 事実として提示することになります。未設定のときツール出力に caseUrl は
-# 現れず、API 自身が返した uri / location だけが返ります。
+# There is no default. The published API specification says nothing about the
+# web console's URL scheme, so a default would make this server present a link
+# it has never verified as if it were fact. When unset, caseUrl does not appear
+# in tool output; you get only the uri / location the API itself returned.
 # caseViewURL: ""
 
 # ---------------------------------------------------------------------------
-# 権限 (operator が決める。モデルは変更できない)
+# Permissions (decided by the operator; the model cannot change them)
 # ---------------------------------------------------------------------------
 
-# 全体キルスイッチ。true の間は、個別の write 付与があっても read に丸められる。
-# 省略時は true (= 既定 read-only)。環境変数 $RH_SC_READ_ONLY でも上書き可能。
+# Global kill switch. While true, any individually granted write is reduced to
+# read. Defaults to true (i.e. read-only by default). Can also be overridden
+# with the environment variable $RH_SC_READ_ONLY.
 readOnly: true
 
-# resources に明示がないリソースの既定値。
-# 省略時はリソースごとの既定 (case/comment = read, kcs = none) が使われます。
+# Default for resources not named under "resources".
+# When omitted, the per-resource defaults apply (case/comment = read, kcs = none).
 # defaultPermission: read
 
 resources:
-  # ケース本体の参照・作成・更新
+  # Reading, creating and updating cases themselves
   case:
     permission: read
-  # ケースコメントの参照・投稿。
-  # case と分けてあるので「返信はさせるが、ステータスや severity は変えさせない」
-  # という構成が書けます (comment: write + case: read)。
+  # Reading and posting case comments.
+  # Kept separate from case, so you can express "let it reply, but don't let it
+  # change status or severity" (comment: write + case: read).
   comment:
     permission: read
-  # ナレッジベース検索。ケース管理とは別の API 面なので、明示的に書かない限り
-  # 有効になりません (defaultPermission を write にしても none のまま)。
+  # Knowledge base search. It is a different API surface from case management,
+  # so it is never enabled unless written explicitly (even defaultPermission:
+  # write leaves it at none).
   # kcs:
   #   permission: read
 
 # ---------------------------------------------------------------------------
-# 応答サイズと timeout
+# Response size and timeout
 # ---------------------------------------------------------------------------
 
-# 1 回の検索が返すケース数の上限 (API 側の上限は 200)。
+# Maximum number of cases one search returns (the API's own cap is 200).
 maxResults: 50
 
-# コメント一覧が返す件数の上限。コメント API には件数パラメータがないため、
-# レスポンス受信後にこちら側で切り詰め、切り詰めた旨をツール出力に書きます。
+# Maximum number of comments a listing returns. The comments API has no count
+# parameter, so truncation happens on this side after the response arrives, and
+# the fact that it was truncated is stated in the tool output.
 maxComments: 50
 
-# 1 回の上流 HTTP 呼び出しの制限時間 (秒)。
+# Time limit for a single upstream HTTP call, in seconds.
 timeoutSeconds: 60
 
 # ---------------------------------------------------------------------------
-# Streamable HTTP トランスポート (既定 OFF)
+# Streamable HTTP transport (off by default)
 # ---------------------------------------------------------------------------
 
-# addr を設定すると stdio ではなく HTTP で待ち受けます。設定しなければ
-# stdio のままです。
+# Setting addr makes the server listen over HTTP instead of stdio. Leave it
+# unset and it stays on stdio.
 #
-# HTTP を使う場合は共有 bearer token が必須で、offline token と同じ文字列は
-# 使えません (どちらも起動時にエラーになります)。設定項目の一覧と意味は
-# examples/http-server.yaml を参照してください。
+# Using HTTP requires a shared bearer token, and it may not be the same string
+# as the offline token (either mistake is a startup error). For the full list of
+# settings and what they mean, see examples/http-server.yaml.
 #
 # http:
 #   addr: ":8080"
-#   # token は $RH_SC_MCP_HTTP_TOKEN から渡すのを推奨。生成:
+#   # Prefer passing the token via $RH_SC_MCP_HTTP_TOKEN. Generate one with:
 #   #   openssl rand -hex 32
 #   stateless: true
 #   trustedOrigins: []
 
 # ---------------------------------------------------------------------------
-# 書き込みを許可する場合の例 (コメント投稿だけ許可する構成)
+# Example of allowing writes (a setup that only permits posting comments)
 # ---------------------------------------------------------------------------
 #
 # readOnly: false
@@ -121,5 +125,6 @@ timeoutSeconds: 60
 #   comment:
 #     permission: write
 #
-# 書き込みが有効な構成では起動時に stderr へ警告が出ます。投稿したコメントは
-# Red Hat サポートとアカウント上の全員に見え、取り消せません。
+# A write-capable configuration prints a warning to stderr at startup. A posted
+# comment is visible to Red Hat support and to everyone on the account, and it
+# cannot be withdrawn.

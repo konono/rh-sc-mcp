@@ -1,12 +1,14 @@
-# Codex で使う
+# Using it with Codex
 
-[使い始める](../README.md) · [クライアント一覧](clients.md)
+**English** · [日本語](ja/codex.md)
 
-Codex CLI と IDE 拡張は MCP 設定を共有します。以下はローカルの Codex から接続する例です。[公式 MCP ガイド](https://developers.openai.com/codex/mcp)
+[Get started](../README.md) · [MCP clients](clients.md)
+
+The Codex CLI and the IDE extension share the same MCP configuration. Below is how to connect from a local Codex. [Official MCP guide](https://developers.openai.com/codex/mcp)
 
 ## stdio
 
-`go install` したバイナリの絶対パスを登録します。
+Register the absolute path of the `go install`-ed binary.
 
 ```bash
 GO_BIN_PATH="$(go env GOBIN)"
@@ -15,17 +17,17 @@ codex mcp add rh-sc -- "$GO_BIN_PATH/rh-sc-mcp"
 codex mcp get rh-sc
 ```
 
-offline token を Codex の設定に実値で書かないでください。Codex を起動する環境から `RH_SC_OFFLINE_TOKEN` を渡す場合、必要に応じて `~/.codex/config.toml` に CLI が作った **既存の `[mcp_servers.rh-sc]` 表の中へ**次の 1 行を加えます。表の見出しを重複して追加しないでください。これは Codex が起動する MCP プロセスへ、その環境変数名を転送する設定です。
+Do not write the real offline token into Codex's configuration. If you want to pass `RH_SC_OFFLINE_TOKEN` from the environment that starts Codex, add the following single line to `~/.codex/config.toml`, **inside the existing `[mcp_servers.rh-sc]` table** that the CLI created, if needed. Do not add a duplicate table heading. This setting forwards that environment variable name to the MCP process Codex launches.
 
 ```toml
 env_vars = ["RH_SC_OFFLINE_TOKEN"]
 ```
 
-Codex が環境変数を受け継がない環境では、サーバー側の `~/.config/rh-sc-mcp/config.yaml` に `offlineToken` を設定できます。Codex の TUI では `/mcp` で接続状態を確認してください。
+In environments where Codex does not inherit environment variables, you can set `offlineToken` in the server's `~/.config/rh-sc-mcp/config.yaml` instead. In the Codex TUI, check the connection state with `/mcp`.
 
 ## Streamable HTTP
 
-サーバーを [HTTP で起動](http.md)した後に登録します。Codex は指定した環境変数の値を bearer token として送ります。**変数名だけが設定に保存され、値は保存されません。**
+Register this after [starting the server over HTTP](http.md). Codex sends the value of the named environment variable as the bearer token. **Only the variable name is saved in the configuration, never the value.**
 
 ```bash
 codex mcp add rh-sc-http --url https://mcp.example.com/mcp \
@@ -33,4 +35,4 @@ codex mcp add rh-sc-http --url https://mcp.example.com/mcp \
 codex mcp get rh-sc-http
 ```
 
-Codex を起動する環境に、サーバー側と同じ共有 `RH_SC_MCP_HTTP_TOKEN` を渡してください。リモートでは HTTPS を使います。接続確認は Codex の `/mcp` で行います。offline token はサーバー側だけに置きます。
+Pass the same shared `RH_SC_MCP_HTTP_TOKEN` the server uses to the environment that starts Codex. Use HTTPS for remote servers. Check the connection with Codex's `/mcp`. The offline token stays on the server side only.

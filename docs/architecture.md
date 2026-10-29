@@ -1,18 +1,20 @@
-# 設計と実装
+# Design and implementation
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/architecture.md)
 
-## 設計方針
+[Get started](../README.md) · [Documentation index](README.md)
 
-1. **公開仕様を正とする。** 同梱の `CaseManagement-API_v1.json` (Swagger 2.0 / `host: api.access.redhat.com` / `basePath: /support`) に書かれている範囲を実装します。仕様に書かれていないことは、設定可能にするか、やらないかのどちらかです。
-2. **権限は登録時と呼び出し時の二重チェック。** 許可外のツールはそもそも列挙されないので、モデルが提案することすらありません。
-3. **既定 read-only。** 書き込みは `readOnly: false` と個別の `permission: write` の **両方** を明示したときだけ有効になります。
-4. **根拠のない値を出力しない。** ケース番号やコンソール URL を推測で組み立てて返すことはしません ([制限事項](limitations.md#制限事項と未確認事項) 参照)。
+## Design principles
+
+1. **The published specification is the source of truth.** What is implemented is what the bundled `CaseManagement-API_v1.json` (Swagger 2.0, `host: api.access.redhat.com`, `basePath: /support`) describes. Anything not in the specification is either made configurable or left out.
+2. **Permissions are checked twice: at registration and at call time.** A tool outside your permissions is never even listed, so the model cannot propose it.
+3. **Read-only by default.** A write becomes possible only when **both** `readOnly: false` and a per-resource `permission: write` are set explicitly.
+4. **Never emit a value without a basis.** Case numbers and console URLs are not assembled from guesses (see [Limitations](limitations.md#limitations-and-unverified-areas)).
 
 ---
-## 対象 API
+## The API surface
 
-同梱の `CaseManagement-API_v1.json` に基づきます。
+Based on the bundled `CaseManagement-API_v1.json`.
 
 ```
 swagger:  2.0
@@ -23,9 +25,9 @@ schemes:  https
 security: Bearer (apiKey, in: header, name: Authorization)
 ```
 
-実装したのは **v3 ケース API と KCS 検索** のみです。仕様書には他にも attachments、SFTP token、accounts、business hours、notified users、external tracker updates などが含まれますが、第一スコープ外として実装していません。
+Only **the v3 case API and KCS search** are implemented. The specification also covers attachments, SFTP tokens, accounts, business hours, notified users, external tracker updates and more, but those are out of the first scope and not implemented.
 
-| 実装 | エンドポイント |
+| Implemented | Endpoint |
 |---|---|
 | ✅ | `POST /v3/cases` |
 | ✅ | `POST /v3/cases/filter` |
@@ -34,87 +36,87 @@ security: Bearer (apiKey, in: header, name: Authorization)
 | ✅ | `GET /v3/cases/{caseNumber}/comments` |
 | ✅ | `POST /v3/cases/{caseNumber}/comments` |
 | ✅ | `GET /v3/cases/{caseNumber}/comments/{commentId}` |
-| ✅ | `POST /search/v2/kcs` (任意、既定 OFF) |
-| ❌ | attachments 系 / SFTP 系 / accounts 系 / businesshours / notifiedusers / externaltrackerupdates / v1 系の固有パス |
+| ✅ | `POST /search/v2/kcs` (optional, off by default) |
+| ❌ | attachments / SFTP / accounts / businesshours / notifiedusers / externaltrackerupdates / v1-specific paths |
 
-### 2xx の揺れへの対応
+### Coping with variation in 2xx responses
 
-同じ成功でも応答の形が一定しないため、以下をすべて許容します。
+The same success can come back in different shapes, so all of the following are accepted.
 
-| 形 | 扱い |
+| Shape | Handling |
 |---|---|
-| `201` + ボディの `location` 配列 | location として採用 |
-| `201` + `Location` ヘッダのみ | 同上 |
-| 両方 (同一値) | 重複排除して 1 件 |
-| `200` でボディが空 | 成功として扱い、メッセージを補う |
-| `204` | 同上 |
-| JSON だが `Content-Type` が `application/json` でない | 先頭が `{` / `[` なら JSON として解釈する |
-| `200` だが HTML (プロキシのサインイン画面など) | **エラーとして報告する** (空の構造体や「成功だが location 不明」を返さない) |
-| コメント 0 件でボディが空 | 空配列として扱う |
+| `201` + a `location` array in the body | Taken as the location |
+| `201` + only a `Location` header | Same |
+| Both (identical values) | De-duplicated to one |
+| `200` with an empty body | Treated as success, with a message supplied |
+| `204` | Same |
+| JSON whose `Content-Type` is not `application/json` | Parsed as JSON if it starts with `{` or `[` |
+| `200` but HTML (a proxy sign-in page, say) | **Reported as an error** (not an empty struct, and not "succeeded but location unknown") |
+| Zero comments with an empty body | Treated as an empty array |
 
-最後の行は作成系でも同じです。`POST /v3/cases` は `Location` ヘッダだけでも成功しうるため「ボディが空なら許容」ですが、**ボディが空でないなら JSON であることを検証します**。これを省くと、ゲートウェイが返した 200 のサインイン画面が「ケースは作成されたが番号が読めなかった」として扱われ、呼び出し側が存在しないケースを探すか、同じケースをもう一度作ってしまいます。
+The last row applies to creation too. `POST /v3/cases` can succeed with only a `Location` header, so an empty body is tolerated — but **if the body is not empty, it is validated as JSON**. Skipping that would let a gateway's `200` sign-in page be read as "the case was created but the number could not be read", which sends the caller looking for a case that does not exist, or creating the same case twice.
 
-なお、このとき出すエラーには診断のためボディの冒頭を引用しますが、**引用部分は洗浄してから切り詰めます**。上流が `Authorization` ヘッダを反射してくるのは、まさにこの「200 + HTML」のケースが多いためです ([セキュリティ上の扱い](#セキュリティ上の扱い) 参照)。
-
----
-## 認証の仕組み
-
-1. offline token を SSO realm に `grant_type=refresh_token` / `client_id=rhsm-api` で提示する
-2. 返ってきた access token を、`expires_in` から **60 秒引いた時刻** までキャッシュする
-3. 以降の API 呼び出しに `Authorization: Bearer <access token>` を付ける
-4. `401` が返ったら、**そのリクエストが使ったトークンだけ** を破棄して 1 回だけ再試行する
-
-補足:
-
-- 同時に複数の呼び出しが走ってもトークン交換は 1 回に直列化されます (offline token の送信回数を増やさないため)。
-- `401` の再試行は 1 回だけです。常に `401` を返すサーバー相手でもループしません。
-- `403` は再試行しません。これは認可の判断であってトークンの失効ではないためです。
-- `expires_in` が無い、あるいは極端に短い応答でも「無期限」とは解釈せず、短い有限の寿命として扱います。
-
-**注意:** 公開仕様が規定しているのは「`Authorization` ヘッダに Bearer トークンを載せる」ところまでです。offline token から access token を得る手順 (SSO realm の URL、`rhsm-api` という client_id) は仕様書には書かれておらず、Red Hat が公開している API トークンの手順および参照実装に基づいています。そのため `ssoTokenURL` / `ssoClientID` は設定で変更できるようにしてあります。
+The error raised in that situation quotes the start of the body for diagnosis, but **the quoted part is scrubbed before it is truncated**. Upstreams reflecting the `Authorization` header back is exactly what tends to happen in this "200 + HTML" case (see [Security handling](#security-handling)).
 
 ---
-## セキュリティ上の扱い
+## How authentication works
 
-### 認証情報を出力に出さない
+1. Present the offline token to the SSO realm with `grant_type=refresh_token` and `client_id=rhsm-api`
+2. Cache the returned access token until **60 seconds before** the time implied by `expires_in`
+3. Attach `Authorization: Bearer <access token>` to subsequent API calls
+4. On a `401`, invalidate **only the token that request used** and retry exactly once
 
-エラーメッセージとログは 2 段階で洗浄します。
+Notes:
 
-1. **プロセスが保持している実値の除去** — offline token と現在の access token の文字列を置換します。access token は更新のたびに変わるため、スナップショットではなく常にその時点の値を参照します。
-2. **パターンによる除去** — `Bearer <...>`、`access_token` / `refresh_token` / `client_secret` などのキー付きの値、`eyJ` で始まる JWT を、このプロセスが見たことのないものでも除去します。上流のエラーがリクエストヘッダをそのまま引用してくる場合や、SSO のエラー応答に新しいトークンが同梱されている場合に効きます。
+- Concurrent calls serialise the token exchange into one, so the offline token is not sent more often than necessary.
+- The `401` retry happens once. Against a server that always returns `401`, there is no loop.
+- A `403` is not retried. That is an authorisation decision, not an expired token.
+- A response with no `expires_in`, or an absurdly short one, is not read as "never expires"; it is treated as a short finite lifetime.
 
-切り詰めは **洗浄のあと** に行います。先に切るとトークンが途中で分断され、残った前半をパターンが検出できなくなるためです。
-
-洗浄は **エラー応答だけでなく、成功応答から作るエラーにも** かかります。`200` で HTML が返ってきたときの「JSON を期待したが〜だった」という診断にはボディの冒頭が引用されますが、プロキシのサインイン画面はリクエストの `Authorization` ヘッダをそのまま含んでいることがあり、ここが抜けていると 2xx 経路だけが漏洩経路として残ります。`internal/redhat` の `Response` は自前の洗浄器を持ち、この引用を洗浄してから切り詰めます。
-
-### パスの安全性
-
-ケース番号は正規表現 (数字 1〜32 桁) で検証し、不正な値はリクエスト送信前に拒否します。加えてパス構築時に全セグメントを `url.PathEscape` します。`../../v3/accounts/current` や `04337263/comments` のような値でパスを書き換えることはできません。コメント ID も同様に英数字 1〜64 文字に制限しています。
-
-### その他
-
-- レスポンスの読み込みは 8 MiB で打ち切ります。
-- エラー本文は洗浄後 2000 バイトで切り詰め、切り詰めたことを明示します。
-- `--print-scope` の出力に認証情報は含めません。
-- 書き込み可能な設定で起動すると stderr に警告が出ます。
-- 書き込み系ツールには `destructiveHint` を付けています (MCP クライアント側の確認プロンプト用)。ツールの説明文にも「取り消せない」「アカウント上の全員に見える」ことを明記しています。
+**Note:** the published specification only goes as far as "put a Bearer token in the `Authorization` header". The procedure for obtaining an access token from an offline token (the SSO realm URL, the `rhsm-api` client_id) is not in the specification; it comes from Red Hat's published API token instructions and reference implementations. That is why `ssoTokenURL` and `ssoClientID` are configurable.
 
 ---
-## 旧参照実装 (hydra-mcp-server) との差分
+## Security handling
 
-[fnarel/hydra-mcp-server](https://github.com/fnarel/hydra-mcp-server) (Python / FastMCP) を参考にしていますが、方針が異なる点があります。
+### Credentials never reach the output
 
-| 観点 | hydra-mcp-server | 本実装 |
+Error messages and logs are scrubbed in two stages.
+
+1. **Removing the real values this process holds** — the offline token and the current access token are substituted out. The access token changes on every refresh, so the current value is consulted each time rather than a snapshot.
+2. **Removing by pattern** — `Bearer <...>`, keyed values such as `access_token` / `refresh_token` / `client_secret`, and JWTs starting with `eyJ` are removed even if this process has never seen them. This catches upstream errors that quote the request headers back, and SSO error responses that carry a new token along with them.
+
+Truncation happens **after** scrubbing. Cutting first would split a token in half and leave a prefix the patterns no longer recognise.
+
+Scrubbing applies **not just to error responses, but to errors built from successful responses**. The "expected JSON but got …" diagnostic produced when `200` returns HTML quotes the start of the body, and a proxy's sign-in page sometimes contains the request's `Authorization` header verbatim; without scrubbing here, the 2xx path would remain as the one leak. `Response` in `internal/redhat` carries its own scrubber and cleans this quotation before truncating it.
+
+### Path safety
+
+Case numbers are validated against a regular expression (1–32 digits) and rejected before a request is sent. On top of that, every path segment is passed through `url.PathEscape` when the path is built. Values like `../../v3/accounts/current` or `04337263/comments` cannot rewrite the path. Comment IDs are similarly restricted to 1–64 alphanumeric characters.
+
+### Other
+
+- Response reading stops at 8 MiB.
+- Error bodies are truncated to 2000 bytes after scrubbing, and the truncation is stated.
+- `--print-scope` output contains no credentials.
+- Starting with a write-capable configuration prints a warning to stderr.
+- Write tools carry `destructiveHint` (for the MCP client's confirmation prompt). Their descriptions also state plainly that the action cannot be undone and is visible to everyone on the account.
+
+---
+## Differences from the earlier reference implementation (hydra-mcp-server)
+
+[fnarel/hydra-mcp-server](https://github.com/fnarel/hydra-mcp-server) (Python / FastMCP) was used as a reference, but several decisions differ.
+
+| Aspect | hydra-mcp-server | This implementation |
 |---|---|---|
-| 言語 / SDK | Python + FastMCP | Go + MCP Go SDK |
-| トランスポート | stdio のみ | stdio (既定) + Streamable HTTP (選択式、bearer 認証必須) |
-| エンドポイント | `access.redhat.com/hydra/rest/v1` (公開仕様書に含まれないパス) | `api.access.redhat.com/support` + `v3` (公開仕様書どおり)。設定で変更可能 |
-| 操作 | 参照のみ (case 取得、case 検索、KCS 検索) | 参照に加えて作成・更新・コメント投稿 |
-| 権限制御 | なし (ツールは常に全部出る) | operator 設定でリソース別に `none`/`read`/`write`。既定 read-only |
-| ケース検索 | Solr (`/search/v2/cases`) | v3 の構造化フィルタ (`POST /v3/cases/filter`) |
-| エラー処理 | `raise_for_status()` をそのまま伝播 | 仕様の `LegacyApiErrorResponse` を解釈し、認証情報を洗浄して返す |
-| トークン | 取得とキャッシュ | 取得・キャッシュに加えて `401` 時の 1 回再試行と、使用トークン単位の破棄 |
+| Language / SDK | Python + FastMCP | Go + MCP Go SDK |
+| Transport | stdio only | stdio (default) + Streamable HTTP (opt-in, bearer auth required) |
+| Endpoint | `access.redhat.com/hydra/rest/v1` (a path not in the published specification) | `api.access.redhat.com/support` + `v3` (as published). Configurable |
+| Operations | Read only (get case, search cases, KCS search) | Reads plus create, update and comment |
+| Permission control | None (all tools always exposed) | Per-resource `none`/`read`/`write` from operator configuration. Read-only by default |
+| Case search | Solr (`/search/v2/cases`) | v3 structured filter (`POST /v3/cases/filter`) |
+| Error handling | Propagates `raise_for_status()` as-is | Interprets the specification's `LegacyApiErrorResponse` and returns it with credentials scrubbed |
+| Tokens | Fetch and cache | Fetch and cache, plus a single retry on `401` and invalidation scoped to the token used |
 
-`/hydra/rest` 系のパスは公開仕様書に含まれていないため、このドキュメントでは設定例を示しません。`baseURL` / `apiVersion` は設定可能なので技術的には向けられますが、そのとき何が返るかは本実装の保証外です (既定以外のエンドポイントを指定すると起動時に警告が出ます)。
+`/hydra/rest` paths are not in the published specification, so this documentation gives no configuration example for them. `baseURL` and `apiVersion` are configurable, so you can technically point there, but what comes back is outside this implementation's guarantees (pointing at a non-default endpoint produces a startup warning).
 
 ---

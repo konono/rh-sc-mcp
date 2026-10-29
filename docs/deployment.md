@@ -1,32 +1,34 @@
-# コンテナと OpenShift / Kubernetes
+# Containers and OpenShift / Kubernetes
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/deployment.md)
 
-このページの `make` と `oc apply -k` の例は、リポジトリを取得してそのルートディレクトリで実行します。
+[Get started](../README.md) · [Documentation index](README.md)
 
-## コンテナと Kubernetes / OpenShift
+The `make` and `oc apply -k` examples on this page are run from the root directory of a checkout of this repository.
 
-公開イメージは `ghcr.io/konono/rh-sc-mcp:latest` です。linux/amd64・linux/arm64 の両方を含み、認証なしの pull と arm64 イメージの `--version` を確認しました。**クラスタへのデプロイ時は、最新 Release のタグをコマンドで取得して、その版に固定します。** こうすればドキュメント内の版番号を書き直し忘れず、動くタグに意図せず追随することもありません。`latest` が移動しても既存 Pod は自動で入れ替わらないため、更新時は再デプロイが必要です。[パッケージページ](https://github.com/users/konono/packages/container/package/rh-sc-mcp)は Public です。
+## Containers and Kubernetes / OpenShift
+
+The published image is `ghcr.io/konono/rh-sc-mcp:latest`. It contains both linux/amd64 and linux/arm64; an unauthenticated pull and `--version` on the arm64 image have been verified. **When deploying to a cluster, look up the latest release tag with a command and pin to that version.** That way you never forget to update a version number written into the documentation, and you never unintentionally follow a moving tag. Existing Pods are not replaced automatically when `latest` moves, so updating requires a redeploy. [The package page](https://github.com/users/konono/packages/container/package/rh-sc-mcp) is public.
 
 ```bash
 podman pull ghcr.io/konono/rh-sc-mcp:latest
 ```
 
-イメージには credential や設定ファイルを含めていません。起動時に `--config` で設定ファイルをマウントし、Red Hat の offline token と別の共有 HTTP token を Secret から環境変数で渡します。OpenShift では後述の `make deploy` がこの Secret を作ります。
+The image contains no credentials and no configuration file. At startup you mount a configuration file with `--config` and pass the Red Hat offline token and the separate shared HTTP token from a Secret as environment variables. On OpenShift, `make deploy` (below) creates that Secret for you.
 
-### イメージの差し替え方
+### Changing the image
 
-手動で kustomize を使う場合は、`deploy/base/kustomization.yaml` の `images:` でタグを固定します。ここで**`name` は変更しません**。`name` は「どのイメージを置換するか」の照合キーで、`deployment.yaml` に書かれた値と一致している必要があります。ここを変更すると照合が外れ、**kustomize は何も置換せず元の値のまま出力します** (エラーも警告も出ません)。以下の `v0.5.0` は例で、実際の最新タグは `gh release view --repo konono/rh-sc-mcp --json tagName --jq .tagName` で確認してください。
+If you use kustomize by hand, pin the tag under `images:` in `deploy/base/kustomization.yaml`. **Do not change `name` there.** `name` is the match key for "which image to replace" and must equal the value written in `deployment.yaml`. Change it and the match fails, so **kustomize substitutes nothing and emits the original value** (with no error and no warning). The `v0.5.0` below is an example; check the real latest tag with `gh release view --repo konono/rh-sc-mcp --json tagName --jq .tagName`.
 
-公式イメージなら `newTag` のみ変更します。別レジストリへ複製する場合は `newName` も変更します。
+For the official image, change only `newTag`. If you mirror it to another registry, change `newName` as well.
 
 ```yaml
 images:
-  - name: ghcr.io/konono/rh-sc-mcp              # 照合キー。触らない
+  - name: ghcr.io/konono/rh-sc-mcp              # match key; leave it alone
     newTag: v0.5.0
 ```
 
-適用前に、置換後のイメージを目で確認してください。
+Look at the substituted image before applying.
 
 ```bash
 kubectl kustomize deploy/overlays/kubernetes | grep 'image:'
@@ -34,43 +36,43 @@ kubectl kustomize deploy/overlays/openshift  | grep 'image:'
 # → image: ghcr.io/konono/rh-sc-mcp:v0.5.0
 ```
 
-指定したタグに変わらない場合は、`name` を書き換えて照合が外れていないか確認してください。
+If it does not change to the tag you specified, check whether you edited `name` and broke the match.
 
-### 認証情報と scope
+### Credentials and scope
 
-**OpenShift なら [`make deploy`](#make-でデプロイする) が Secret も作ります。** `~/.config/rh-sc-mcp` の token ファイルから読み、改行を落として `--from-file` で渡すので、下の手順を自分で踏む必要はありません。
+**On OpenShift, [`make deploy`](#deploying-with-make) creates the Secret too.** It reads the token files under `~/.config/rh-sc-mcp`, strips newlines and passes them with `--from-file`, so you do not need to do the following by hand.
 
-Kubernetes overlay を使う場合や、Secret だけ先に作りたい場合は次のようにします。**`--from-literal` は使わないでください** — 値が `kubectl` の `argv` に乗り、同じホストの誰でも `ps` で読めます。
+If you use the Kubernetes overlay, or want to create just the Secret first, do this. **Do not use `--from-literal`** — the value rides in `kubectl`'s `argv`, where anyone on the same host can read it with `ps`.
 
 ```bash
-# 1. 認証情報。offline token と共有 HTTP token は別の値にすること。
-#    ファイル経由で渡す。末尾の改行は Secret の値に入ってしまうので落とす。
+# 1. Credentials. The offline token and the shared HTTP token must be different values.
+#    Pass them via files. Strip trailing newlines, which would otherwise end up in the Secret.
 mkdir -p ~/.config/rh-sc-mcp && chmod 700 ~/.config/rh-sc-mcp
 install -m 600 /dev/null ~/.config/rh-sc-mcp/token
-$EDITOR ~/.config/rh-sc-mcp/token          # offline token を貼る
+$EDITOR ~/.config/rh-sc-mcp/token          # paste the offline token
 ( umask 077; openssl rand -hex 32 | tr -d '\n' > ~/.config/rh-sc-mcp/http-token )
 
-# 2. Secret を作る。末尾改行を落とした一時ファイルを経由する。
-#    サブシェルにまとめてあるのは、kubectl が失敗しても必ず消すため。
+# 2. Create the Secret, going through a temp file with the trailing newline stripped.
+#    It is wrapped in a subshell so the temp file is removed even if kubectl fails.
 (
   umask 077                                  # dir 700 / file 600
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT                  # 成功・失敗どちらでも消える
+  trap 'rm -rf "$tmp"' EXIT                  # removed on success and on failure
   printf '%s' "$(cat ~/.config/rh-sc-mcp/token)" > "$tmp/offlineToken"
   kubectl create secret generic rh-sc-mcp \
     --from-file=offlineToken="$tmp/offlineToken" \
     --from-file=httpToken="$HOME/.config/rh-sc-mcp/http-token"
 )
 
-# 3. scope。readOnly と resources を確認する。
+# 3. Scope. Review readOnly and resources.
 $EDITOR deploy/base/config.yaml
 ```
 
-サーバーは環境変数を trim しないので、**値に改行が残ると** offline token は SSO が `invalid_grant` を返し、bearer token は照合が外れて全リクエストが `401` になります。原因の分かりにくい失敗なので、`--from-file` に渡すファイルは必ず改行なしにしてください。
+The server does not trim environment variables, so **a leftover newline in a value** makes SSO return `invalid_grant` for the offline token, and makes the bearer token fail comparison so that every request gets a `401`. These failures are hard to diagnose, so always make the files you pass to `--from-file` newline-free.
 
-`deploy/base/secret.example.yaml` は `REPLACE_ME` 入りのテンプレートです。実値を入れたファイルは `.gitignore` 済み (`deploy/**/secret.yaml` 等) なので、サンプルだけが追跡されます。
+`deploy/base/secret.example.yaml` is a template containing `REPLACE_ME`. Files with real values are already in `.gitignore` (`deploy/**/secret.yaml` and friends), so only the sample is tracked.
 
-### 適用前の確認
+### Reviewing before applying
 
 ```bash
 kubectl kustomize deploy/overlays/kubernetes
@@ -79,83 +81,83 @@ kubectl kustomize deploy/overlays/openshift
 
 ### OpenShift
 
-`Route` は `host` を省いているのでクラスタが生成し、`termination: edge` がルーターの既定証明書を使います。追加の編集は不要です。ただしその既定証明書を MCP クライアント側が信頼できるかは別問題で、検証時はローカルの信頼ストアで検証できませんでした ([制限事項 7](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み))。
+The `Route` omits `host`, so the cluster generates one, and `termination: edge` uses the router's default certificate. No further editing is needed. Whether an MCP client can trust that default certificate is a separate question, and during testing it could not be validated against a local trust store ([limitation 7](limitations.md#7-containers-verified-on-podman-openshift-and-the-published-image)).
 
 ```bash
 oc apply -k deploy/overlays/openshift
 ```
 
-これは手で順番に実行する形です。ビルド・適用・確認を毎回同じ手順で行うなら、次の `make` を使ってください。段階は同じで、各段を 1 コマンドにしてあります。
+That is the step-by-step form. If you build, apply and check in the same sequence every time, use the `make` targets below instead. The stages are identical, with one command each.
 
-### `make` でデプロイする
+### Deploying with `make`
 
-`scripts/deploy-openshift.sh` を Makefile から呼びます。`NAMESPACE` と `IMAGE` に既定値はありません。どちらも書き込み先を指す値で、既定を決めるとこちらが勝手に選ぶことになるためです。
+The Makefile calls `scripts/deploy-openshift.sh`. `NAMESPACE` and `IMAGE` have no defaults: both name a write target, and picking a default would mean choosing one on your behalf.
 
 ```bash
-# 1. 最新 Release のタグを取得する (gh CLI が必要)
+# 1. Get the latest release tag (requires the gh CLI)
 TAG="$(gh release view --repo konono/rh-sc-mcp --json tagName --jq .tagName)"
 IMAGE="ghcr.io/konono/rh-sc-mcp:$TAG"
 
-# 2. 何が適用されるかを見る (クラスタは変更しない)
+# 2. See what would be applied (does not change the cluster)
 make deploy-plan NAMESPACE=rh-sc-mcp IMAGE="$IMAGE"
 
-# 3. 適用 (ビルドと push は不要)
+# 3. Apply (no build or push needed)
 make deploy NAMESPACE=rh-sc-mcp IMAGE="$IMAGE"
 
-# 4. 状態と Route URL
+# 4. Status and Route URL
 make deploy-status NAMESPACE=rh-sc-mcp
 ```
 
-自分で改変したイメージを使う場合だけ、`make deploy-image IMAGE=<registry>/<name>:<tag> ARCH=<node-arch>` でビルド・push できます。
+Only if you use your own modified image do you need `make deploy-image IMAGE=<registry>/<name>:<tag> ARCH=<node-arch>` to build and push.
 
-### 公開イメージの OpenShift 検証
+### Verifying the published image on OpenShift
 
-2026-10-26 に v0.5.0 を専用 namespace へ配置して確認しました。検証では Route を作らない base マニフェストを使い、Secret を `--from-file` で作成してから、イメージを v0.5.0 に固定した一時 overlay を適用しました。`oc rollout status deployment/rh-sc-mcp` で 2 Pod の Ready を確認し、Pod 内で `rh-sc-mcp --config /etc/rh-sc-mcp/config.yaml --check-auth` を実行しました。本番 offline token で SSO 交換と読み取り専用 API プローブが成功しています。
+On 2026-10-26, v0.5.0 was deployed to a dedicated namespace and checked. The verification used the base manifests, which create no Route, created the Secret with `--from-file`, and then applied a temporary overlay pinning the image to v0.5.0. `oc rollout status deployment/rh-sc-mcp` confirmed 2 Pods Ready, and `rh-sc-mcp --config /etc/rh-sc-mcp/config.yaml --check-auth` was run inside a Pod. With a production offline token, the SSO exchange and the read-only API probe both succeeded.
 
-HTTP は別の dummy token を使った配置で、`oc port-forward svc/rh-sc-mcp 18080:80` を通して確認しました。**Service のポートは 80** (コンテナは 8080) です。`/healthz` と `/readyz` は 200、未認証の `/mcp` は 401、認証付き initialize は 200 でした。両検証の namespace と Secret は削除済みです。公開イメージの Route 経由と実ケースの取得は未確認です ([検証範囲の詳細](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み))。
+HTTP was checked in a separate deployment using a dummy token, through `oc port-forward svc/rh-sc-mcp 18080:80`. **The Service port is 80** (the container listens on 8080). `/healthz` and `/readyz` returned 200, unauthenticated `/mcp` returned 401, and an authenticated initialize returned 200. The namespaces and Secrets from both runs have been deleted. Access through a Route with the published image, and fetching a real case, remain unverified ([details of what was verified](limitations.md#7-containers-verified-on-podman-openshift-and-the-published-image)).
 
-**token はファイルから読みます。** `~/.config/rh-sc-mcp/token` に Red Hat の offline token を `chmod 600` で置いてください。共有 bearer token (`http-token`) は無ければ生成して同じ場所に保存し、以後使い回します — 毎回作り直すと、設定済みのクライアントが全部 `401` になるからです。検証用に別のディレクトリを使うときは `RH_SC_MCP_CREDENTIAL_DIR` で差し替えられます。
+**Tokens are read from files.** Put the Red Hat offline token in `~/.config/rh-sc-mcp/token` with mode 600. If the shared bearer token (`http-token`) is absent it is generated and saved in the same place, then reused — regenerating it every time would give every configured client a `401`. To use a different directory for testing, override it with `RH_SC_MCP_CREDENTIAL_DIR`.
 
-| 項目 | 扱い |
+| Aspect | Handling |
 |---|---|
-| 値の渡し方 | `--from-file`。`--from-literal` は値が `argv` に乗り `ps` で見えます |
-| 末尾の改行 | 取り除きます。サーバーは環境変数を trim しないので、残ると SSO が `invalid_grant`、bearer 照合が全件 `401` になります |
-| 値の中の空白 | **拒否します**。黙って削ると、原因の分からない `401` に化けます |
-| 出力 | 値・ハッシュ・長さのいずれも出しません |
-| ConfigMap | `deploy/base/config.yaml` に `offlineToken` / `http.token` があれば適用前に停止します。そこに書いた値は、その ConfigMap を読める権限を持つ相手に見えます |
+| How values are passed | `--from-file`. With `--from-literal` the value rides in `argv` and is visible via `ps` |
+| Trailing newlines | Stripped. The server does not trim environment variables, so leftovers make SSO return `invalid_grant` and make every bearer comparison fail with `401` |
+| Whitespace inside a value | **Rejected.** Silently stripping it turns into an unexplainable `401` |
+| Output | Neither the value, nor a hash, nor the length is printed |
+| ConfigMap | If `deploy/base/config.yaml` contains `offlineToken` or `http.token`, the script stops before applying. Anything written there is visible to whoever can read that ConfigMap |
 
-**手元で確かめられることは、クラスタを触る前に確かめます。** token ファイルの不在・権限・改行・値の中の空白、そして kustomize のレンダエラーは、namespace を作る前に出ます。
+**Whatever can be checked locally is checked before touching the cluster.** A missing token file, wrong permissions, a newline, whitespace inside a value, and kustomize render errors all surface before the namespace is created.
 
-ただし**それ以降の失敗までは防げません**。namespace を作ったあとの Secret 作成や `oc apply` が RBAC や通信で失敗すれば、**空の namespace は残ります**。その場合は原因を直して再実行してください — 同じコマンドを繰り返して問題ない作りです。
+**Failures after that point cannot be prevented, though.** If Secret creation or `oc apply` fails on RBAC or networking after the namespace exists, **an empty namespace is left behind**. Fix the cause and run it again — the script is built to be safe to repeat.
 
-**消すものはありません。** `oc apply` は `--prune` なしで実行します。overlay から消したリソースはクラスタに残るので、片付けは意図的に手で行ってください。Secret は毎回 `~/.config/rh-sc-mcp` の内容で上書きされ、その後 `oc rollout restart` が走ります — ConfigMap と違って Secret の名前はハッシュを持たないため、再起動しないと Pod は古い値のままです。
+**Nothing is deleted.** `oc apply` runs without `--prune`. Resources removed from the overlay stay in the cluster, so cleanup is a deliberate manual step. The Secret is overwritten from `~/.config/rh-sc-mcp` on every run, followed by `oc rollout restart` — unlike ConfigMaps, Secret names carry no hash, so without a restart the Pods keep the old values.
 
 ### Kubernetes
 
-`Ingress` は**そのままでは適用できません**。あなたにしか用意できない 2 つの値がプレースホルダになっています。
+The `Ingress` **cannot be applied as-is.** Two values only you can supply are placeholders.
 
 ```bash
-# 3. ホスト名 (rh-sc-mcp.example.com を 2 箇所)
+# 3. The hostname (rh-sc-mcp.example.com, in two places)
 $EDITOR deploy/overlays/kubernetes/ingress.yaml
 
-# 4. そのホスト名の TLS 証明書 (cert-manager 等が発行するなら不要)
+# 4. A TLS certificate for that hostname (not needed if cert-manager or similar issues one)
 kubectl create secret tls rh-sc-mcp-tls --cert=tls.crt --key=tls.key
 
 kubectl apply -k deploy/overlays/kubernetes
 ```
 
-**TLS は必須です。** bearer token は毎リクエストのヘッダに乗るので、平文 HTTP は経路上の誰にでも token を渡します。
+**TLS is mandatory.** The bearer token rides in a header on every request, so plaintext HTTP hands the token to anyone on the path.
 
-### マニフェストの中身
+### What is in the manifests
 
-`deploy/base` に Deployment / Service と、`deploy/base/config.yaml` から生成される ConfigMap があります。認証情報は Secret に置くので、scope は git でレビューしつつ token は入れない構成です。kustomize が ConfigMap 名をハッシュ化するため、scope を変えると Pod が入れ替わります (scope は起動時に 1 度しか読まないので、これが無いと編集が反映されません)。
+`deploy/base` holds a Deployment and a Service, plus a ConfigMap generated from `deploy/base/config.yaml`. Credentials live in a Secret, so the scope can be reviewed in git while the token stays out of it. kustomize hashes the ConfigMap name, so changing the scope replaces the Pods (the scope is read once at startup, so without that the edit would not take effect).
 
-マニフェストは、コンテナを非 root・read-only root filesystem・全 capability drop・`RuntimeDefault` seccomp で動かす設定にしています。イメージは `USER 65532:65532` を宣言しています (マニフェストの `runAsNonRoot` が数値の UID を必要とするため)。一方 OpenShift の `restricted-v2` SCC は namespace のレンジから任意の UID を割り当て、イメージの `USER` を無視します。
+The manifests run the container as non-root, with a read-only root filesystem, all capabilities dropped and the `RuntimeDefault` seccomp profile. The image declares `USER 65532:65532` (because `runAsNonRoot` in the manifests requires a numeric UID). OpenShift's `restricted-v2` SCC, meanwhile, assigns an arbitrary UID from the namespace's range and ignores the image's `USER`.
 
-**割り当てられた UID に依存しないよう、特定 UID やファイル所有権への依存を避けてあります** — バイナリは誰でも読める配置に置いてあり、**この構成ではマウントした設定を `--config` で読むだけで、起動時にファイルを書きません**。マニフェスト側で `runAsUser` を固定していないのも、SCC の割り当てを妨げないためです。これは設計意図にとどまりません。**任意に選んだ UID 1000650000 で、read-only root filesystem + 全 capability drop のもと実際に動くことを Podman で確認**し、さらに **OpenShift 実クラスタで `restricted-v2` が割り当てた UID 1000980000 でも Pod が Ready になることを確認**しました ([制限事項 7](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み))。確認したのはこの 2 つの UID で、全 UID を試したわけではありません。
+**To stay independent of the assigned UID, nothing depends on a specific UID or on file ownership** — the binary is placed where anyone can read it, and **in this configuration the server only reads the mounted configuration via `--config` and writes no files at startup**. The manifests also avoid pinning `runAsUser`, so as not to interfere with the SCC's assignment. This is not just design intent: **running under an arbitrarily chosen UID of 1000650000 with a read-only root filesystem and all capabilities dropped was verified with Podman**, and **on a real OpenShift cluster the Pod reached Ready under UID 1000980000 as assigned by `restricted-v2`** ([limitation 7](limitations.md#7-containers-verified-on-podman-openshift-and-the-published-image)). Those are the two UIDs that were checked, not every possible one.
 
-書き込みが起きないのは `--config` を渡しているからです。これを省くと既定の設定ファイルを作ろうとして `$HOME` に書き込みます。マニフェストは `args` で常に渡すので該当しませんが、`CMD` を置き換える場合は[制限事項 7](limitations.md#7-コンテナは-podmanopenshift公開イメージで検証済み) を参照してください。
+Writes are absent because `--config` is passed. Omit it and the server tries to create the default configuration file, writing into `$HOME`. The manifests always pass it via `args`, so this does not apply there; if you replace `CMD`, see [limitation 7](limitations.md#7-containers-verified-on-podman-openshift-and-the-published-image).
 
-OpenShift overlay の `Route` には 300 秒の HAProxy タイムアウトを付けています。streamed な MCP 応答は開いたままになるため、ルーターの既定 30 秒では切られます。Kubernetes overlay は代わりに `Ingress` を置きます。どちらも公開するのは `/mcp` だけで、プローブはクラスタ内に留めます。
+The OpenShift overlay's `Route` carries a 300-second HAProxy timeout, because a streamed MCP response stays open and the router's 30-second default would cut it. The Kubernetes overlay uses an `Ingress` instead. Both expose only `/mcp`, keeping the probes inside the cluster.
 
 ---

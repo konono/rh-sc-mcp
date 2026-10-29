@@ -1,12 +1,14 @@
-# OpenCode で使う
+# Using it with OpenCode
 
-[使い始める](../README.md) · [クライアント一覧](clients.md)
+**English** · [日本語](ja/opencode.md)
 
-OpenCode は `opencode.json` またはユーザー共通の `~/.config/opencode/opencode.json` で MCP を設定します。**1.x と 2.x は `mcp` の形が違います。** 先に `opencode --version` で確認してください。[1.x の公式ガイド](https://dev.opencode.ai/docs/mcp-servers/) / [2.x の公式ガイド](https://dev.opencode.ai/v2/docs/mcp-servers/)
+[Get started](../README.md) · [MCP clients](clients.md)
 
-## 1.x の設定
+OpenCode configures MCP through `opencode.json` or the user-wide `~/.config/opencode/opencode.json`. **The shape of `mcp` differs between 1.x and 2.x.** Check with `opencode --version` first. [Official 1.x guide](https://dev.opencode.ai/docs/mcp-servers/) / [Official 2.x guide](https://dev.opencode.ai/v2/docs/mcp-servers/)
 
-手元の OpenCode 1.18.23 と同じ形式です。`/absolute/path/to/rh-sc-mcp` は `go install` の保存先に置き換えます。
+## Configuration for 1.x
+
+This is the format used by OpenCode 1.18.23, the version tested here. Replace `/absolute/path/to/rh-sc-mcp` with where `go install` put the binary.
 
 ### stdio
 
@@ -39,9 +41,9 @@ OpenCode は `opencode.json` またはユーザー共通の `~/.config/opencode/
 }
 ```
 
-## 2.x の設定
+## Configuration for 2.x
 
-2.x ではサーバー名を `mcp.servers` の下に置きます。1.x の `enabled` は使わず、無効化には `disabled: true` を使います。
+In 2.x the server name goes under `mcp.servers`. The 1.x `enabled` key is gone; use `disabled: true` to turn a server off.
 
 ### stdio
 
@@ -77,6 +79,6 @@ OpenCode は `opencode.json` またはユーザー共通の `~/.config/opencode/
 }
 ```
 
-HTTP の共有 token は OpenCode の起動環境に置きます。`{env:RH_SC_MCP_HTTP_TOKEN}` は OpenCode の設定構文であり、値をファイルに保存しません。リモートでは HTTPS を使い、offline token は HTTP サーバー側だけに置きます。stdio の offline token は OpenCode の起動環境から `RH_SC_OFFLINE_TOKEN` を渡すか、サーバー側の設定ファイルに置きます。
+Keep the shared HTTP token in OpenCode's launch environment. `{env:RH_SC_MCP_HTTP_TOKEN}` is OpenCode's own configuration syntax and does not store the value in the file. Use HTTPS for remote servers, and keep the offline token on the HTTP server side only. For stdio, pass the offline token as `RH_SC_OFFLINE_TOKEN` from OpenCode's launch environment, or put it in the server's configuration file.
 
-`opencode mcp list` で接続状態を確認してください。設定の既存キーを消さずに `mcp` の対象位置へ追記し、同じ名前の登録が既にある場合は内容を確認してから変更してください。
+Check the connection state with `opencode mcp list`. Add to the right place under `mcp` without deleting existing keys, and if an entry of the same name already exists, look at it before changing anything.
