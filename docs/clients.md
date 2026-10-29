@@ -1,47 +1,49 @@
-# MCP クライアントへの登録
+# Registering with MCP clients
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/clients.md)
 
-## MCP クライアントからの接続
+[Get started](../README.md) · [Documentation index](README.md)
 
-サーバーの MCP 実装はクライアントに依存しません。登録する設定形式だけが違います。
+## Connecting from an MCP client
 
-| クライアント | stdio / HTTP の登録例 | 接続確認 |
+The server's MCP implementation does not depend on the client. Only the configuration format differs.
+
+| Client | Registration examples (stdio / HTTP) | How to check the connection |
 |---|---|---|
-| Claude Code | [このページ](#stdio-で接続する) | `/mcp` |
-| Codex (CLI / IDE) | [Codex](codex.md) | `/mcp`、`codex mcp get rh-sc` |
+| Claude Code | [This page](#connecting-over-stdio) | `/mcp` |
+| Codex (CLI / IDE) | [Codex](codex.md) | `/mcp`, `codex mcp get rh-sc` |
 | Cursor | [Cursor](cursor.md) | Customize → MCPs |
 | OpenCode | [OpenCode](opencode.md) | `opencode mcp list` |
 
-登録方法はトランスポートでも変わります。
+Registration also differs by transport.
 
-| | stdio (既定) | Streamable HTTP |
+| | stdio (default) | Streamable HTTP |
 |---|---|---|
-| サーバーの起動 | クライアントが起動する | 運用者が常駐させる |
-| クライアント設定 | `command` + `args` | `type: http` + `url` + `headers` |
-| 認証 | 不要 (OS が制御) | 共有 bearer token が必須 |
-| offline token | クライアント側に必要 | **サーバー側のみ**。クライアントは持たない |
+| Starting the server | The client starts it | An operator runs it continuously |
+| Client configuration | `command` + `args` | `type: http` + `url` + `headers` |
+| Authentication | None (the OS controls access) | A shared bearer token is required |
+| Offline token | Needed on the client side | **Server side only.** The client never holds it |
 
-HTTP の場合、クライアントが持つのは共有 bearer token だけで、Red Hat の offline token はサーバー側に留まります。これが HTTP 構成の利点です。
+Over HTTP the client only holds the shared bearer token, and the Red Hat offline token stays on the server. That is the advantage of the HTTP setup.
 
-### stdio で接続する
+### Connecting over stdio
 
 #### Claude Code
 
-既定パスに設定した場合、`--config` は不要です。Claude Code に **go install で配置したバイナリの絶対パス**を登録します。
+If you use the default configuration path, `--config` is not needed. Register **the absolute path of the binary placed by go install** with Claude Code.
 
 ```bash
 GO_BIN_PATH="$(go env GOBIN)"
-# GOPATH は複数要素を持てる。go install が書くのは先頭要素なので、そこだけ取る
+# GOPATH can hold several elements; go install writes to the first one, so take only that
 if [ -z "$GO_BIN_PATH" ]; then GO_BIN_PATH="$(go env GOPATH | cut -d: -f1)/bin"; fi
 claude mcp add --scope user rh-sc -- "$GO_BIN_PATH/rh-sc-mcp"
 ```
 
-`--scope user` は**すべてのプロジェクトから使える**登録です。`install.sh` が使う scope と同じで、これが既定の勧めです。**`claude mcp add` 自体の既定は `--scope local`** なので、`--scope` を省くと実行したディレクトリにしか登録されません。このプロジェクトでだけ試したい場合に限り `--scope local` に置き換えてください。
+`--scope user` registers the server **for use from every project**. It is the same scope `install.sh` uses, and it is the recommended default. **`claude mcp add` itself defaults to `--scope local`**, so omitting `--scope` registers the server only in the directory you ran it in. Substitute `--scope local` only if you want to try it in this one project.
 
-以前に `bin/rh-sc-mcp` など別のパスで `rh-sc` を登録した場合は、先に `claude mcp remove rh-sc -s user` で古い登録を削除してから上のコマンドを実行します。過去に local scope で登録していた場合は、**その登録を行ったディレクトリで** `claude mcp remove rh-sc -s local` を実行して外してください (scope ごとに別のレジストリなので、user に登録しても local の登録は残ります)。登録後は `claude mcp get rh-sc` で `Scope` が `User config` に、`Command` が Go のインストール先になっていることを確認できます (接続状態の確認には offline token が必要です)。
+If you previously registered `rh-sc` at a different path such as `bin/rh-sc-mcp`, remove the old entry with `claude mcp remove rh-sc -s user` before running the command above. If you once registered it at local scope, run `claude mcp remove rh-sc -s local` **from the directory where you registered it** (each scope is a separate registry, so a user-scope entry does not replace the local one). After registering, `claude mcp get rh-sc` should show `Scope` as `User config` and `Command` as Go's install location (checking the connection state additionally requires the offline token).
 
-#### 設定ファイルで直接書く場合
+#### Writing the configuration file directly
 
 ```json
 {
@@ -54,21 +56,21 @@ claude mcp add --scope user rh-sc -- "$GO_BIN_PATH/rh-sc-mcp"
 }
 ```
 
-`command` は `"$GO_BIN_PATH/rh-sc-mcp"` の実際の絶対パスに置き換えます。シェル変数そのものを JSON に書いても、シェルのようには展開されません。`RH_SC_OFFLINE_TOKEN` は Claude Code を起動する環境から渡します。
+Replace `command` with the real absolute path that `"$GO_BIN_PATH/rh-sc-mcp"` expands to. Writing the shell variable itself into JSON does not expand it the way a shell would. `RH_SC_OFFLINE_TOKEN` comes from the environment that starts Claude Code.
 
-offline token をサーバーの設定ファイル側 (`offlineToken:`) に書くこともできます。MCP クライアントの設定ファイルには token の実値を書かないでください (エージェントが読める場所であることが多いため)。
+You can also put the offline token on the server side instead (`offlineToken:`). Do not write the real token value into an MCP client's configuration file — those files are usually readable by the agent.
 
-別の場所に設定ファイルを置く場合は `--config /path/to/config.yaml` を追加します。
+To keep the configuration file elsewhere, add `--config /path/to/config.yaml`.
 
-ログは **stderr** に出ます。stdout は MCP のトランスポートなので、プロトコルフレーム以外は一切流しません。
+Logs go to **stderr**. stdout is the MCP transport, so nothing but protocol frames is ever written there.
 
-### HTTP で接続する
+### Connecting over HTTP
 
-サーバー側の立て方は [HTTP で公開する](http.md#http-で公開する) を参照してください。ここはクライアント側の登録です。
+For how to stand up the server, see [Exposing the server over HTTP](http.md#exposing-the-server-over-http). This section is about the client side.
 
-#### 推奨: `.mcp.json` に書き、token は環境変数で渡す
+#### Recommended: write `.mcp.json` and pass the token via an environment variable
 
-プロジェクトの `.mcp.json` に次を置きます。**token の実値はここに書きません** — `${VAR}` 形式で環境変数を参照します ([Claude Code の MCP ドキュメント](https://code.claude.com/docs/en/mcp) に記載された展開機能)。
+Put the following in the project's `.mcp.json`. **The real token value does not go here** — reference an environment variable with the `${VAR}` form (an expansion feature documented in the [Claude Code MCP docs](https://code.claude.com/docs/en/mcp)).
 
 ```json
 {
@@ -84,69 +86,69 @@ offline token をサーバーの設定ファイル側 (`offlineToken:`) に書�
 }
 ```
 
-クライアントを起動する環境に、**サーバー側と同じ共有 token** を入れておきます。値はシークレットストアから渡すのが最善です。
+Put **the same shared token the server uses** into the environment that starts the client. Feeding it from a secret store is best.
 
 ```bash
-# 例: シークレットストアから取り出して渡す
+# Example: read it out of a secret store and pass it in
 RH_SC_MCP_HTTP_TOKEN="$(your-secret-tool read rh-sc-mcp/httpToken)" claude
 ```
 
-手で入力する場合は、**エコーしない読み取り**を使ってください。
+If you type it by hand, use a **non-echoing read**.
 
 ```bash
 read -rs RH_SC_MCP_HTTP_TOKEN && export RH_SC_MCP_HTTP_TOKEN
 claude
 ```
 
-`export RH_SC_MCP_HTTP_TOKEN="<実値>"` と直接打つのは避けます。**そのコマンド自体がシェル履歴に残ります。**
+Avoid typing `export RH_SC_MCP_HTTP_TOKEN="<real value>"` directly. **That command itself lands in your shell history.**
 
-この形で避けられるのは、**設定ファイルとコマンド引数への実値の記載**です。`.mcp.json` は実値を含まないのでリポジトリに追跡させられ、共有しても秘密は広がりません。一方で**値は Claude Code の環境変数としては存在します**。秘密が消えるわけではなく、置き場所を 1 箇所に絞っているだけだと理解してください。
+What this approach avoids is **the real value appearing in configuration files and in command arguments**. Because `.mcp.json` contains no real value, it can be tracked in the repository and shared without spreading the secret. That said, **the value does exist as an environment variable of Claude Code**. The secret does not disappear; you have only narrowed it down to one place.
 
-#### URL の指定
+#### Choosing the URL
 
-| 用途 | URL |
+| Purpose | URL |
 |---|---|
-| ローカルで動かしたサーバーに繋ぐ | `http://127.0.0.1:8080/mcp` |
-| リモートのサーバーに繋ぐ | `https://mcp.example.com/mcp` |
+| Connect to a server running locally | `http://127.0.0.1:8080/mcp` |
+| Connect to a remote server | `https://mcp.example.com/mcp` |
 
-パスは常に `/mcp` です。リモートでは **HTTPS が必須** です — bearer token は毎リクエストのヘッダに乗るので、平文 HTTP は経路上の誰にでも token を渡します。ローカルの `127.0.0.1` はループバックに閉じるため平文で構いません。
+The path is always `/mcp`. **HTTPS is mandatory for remote servers** — the bearer token rides in a header on every request, so plaintext HTTP hands the token to anyone on the path. Plaintext is fine for local `127.0.0.1`, which stays on the loopback interface.
 
-#### 接続の確認
+#### Verifying the connection
 
-project scope の `.mcp.json` は、**初回にワークスペースの信頼とサーバーの承認を求められることがあります**。承認前は接続されず、状態は「Pending approval」と表示されます。承認は対話的な `claude` セッションで行います。
+A project-scope `.mcp.json` **may ask you to trust the workspace and approve the server the first time**. Until it is approved the server is not connected and the status reads "Pending approval". Approval happens in an interactive `claude` session.
 
-**承認する前に、`url` と、`Authorization` ヘッダがどこへ送られるかを確認してください。** `.mcp.json` はリポジトリで共有されるファイルなので、自分が書いたとは限りません。承認するということは、その URL に毎リクエスト共有 token を送ることに同意するということです。
+**Before approving, check the `url` and where the `Authorization` header will be sent.** `.mcp.json` is a file shared through the repository, so you may not be the one who wrote it. Approving means agreeing to send the shared token to that URL on every request.
 
 ```bash
 claude mcp get rh-sc-http
 ```
 
-承認後は health check が走ります。なお `claude mcp get` は **ヘッダを設定ファイルに書かれたまま (`Bearer ${RH_SC_MCP_HTTP_TOKEN}`) 表示します** — 展開後の値は出ません。したがってこの出力は「環境変数が正しく設定されているか」の確認には使えません。実際に繋がっているかは、承認後に `claude` セッション内で `/mcp` を実行してサーバーとツールが見えることで確認してください。
+After approval a health check runs. Note that `claude mcp get` **shows the header exactly as written in the configuration file (`Bearer ${RH_SC_MCP_HTTP_TOKEN}`)** — the expanded value is not printed. This output therefore cannot tell you whether the environment variable is set correctly. To confirm the connection is actually working, run `/mcp` inside a `claude` session after approval and check that the server and its tools are visible.
 
-#### `--header` を使わない理由
+#### Why not `--header`
 
-公式ドキュメントには CLI での追加例もあります。
+The official documentation also shows a CLI form.
 
 ```bash
-# 推奨しません
+# Not recommended
 claude mcp add --transport http rh-sc-http https://mcp.example.com/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
-この形だと **token の実値がコマンド引数に乗ります**。実行中は `ps` の出力やプロセス一覧から同じ機械の他プロセスに見え、さらに登録先の設定ファイルにも実値が書き込まれます。実値を直接打った場合は、そのコマンド行がシェル履歴にも残ります。
+In this form **the real token value rides in the command arguments**. While the command runs it is visible to other processes on the same machine through `ps` or a process listing, and the real value is also written into the target configuration file. If you typed the real value, the command line ends up in your shell history too.
 
-`.mcp.json` + 環境変数参照なら、**設定ファイルとコマンド引数への実値の記載を避けられます**。ただし値は Claude Code の環境変数としては存在します — 「どこにも残らない」わけではありません。その環境変数をどう用意するかは[前述](#推奨-mcpjson-に書きtoken-は環境変数で渡す)のとおり別途注意が要ります。
+With `.mcp.json` plus an environment variable reference, **you avoid the real value in both configuration files and command arguments**. The value still exists as an environment variable of Claude Code — it is not "gone from everywhere". How you populate that environment variable needs its own care, as [described above](#recommended-write-mcpjson-and-pass-the-token-via-an-environment-variable).
 
-同じ理由で、**token を追跡対象のファイルに直接書かないでください**。`.mcp.json` に `${VAR}` ではなく実値を書くと、そのままコミットされます。
+For the same reason, **do not write the token directly into a tracked file**. Putting a real value in `.mcp.json` instead of `${VAR}` means committing it.
 
-#### 検証状況
+#### What has been verified
 
-この環境 (Claude Code 2.1.310) で確認したのは次の範囲です。
+In this environment (Claude Code 2.1.310) the following was confirmed:
 
-- `.mcp.json` の `type: http` / `url` / `headers` という構文が受理され、HTTP サーバーとして認識されること
-- `claude mcp get` が type / URL / ヘッダを表示し、ヘッダの `${VAR}` を未展開のまま出すこと
-- `claude mcp add --transport http ... --header` が存在し、値が引数に乗ること
+- The `type: http` / `url` / `headers` syntax in `.mcp.json` is accepted and recognised as an HTTP server
+- `claude mcp get` displays the type, URL and headers, and prints `${VAR}` in headers unexpanded
+- `claude mcp add --transport http ... --header` exists, and the value rides in the arguments
 
-`${VAR}` が接続時に実際に展開されることは**公式ドキュメントの記載に依拠**しており、この環境では確認していません。project scope の承認は対話セッションを要し、非対話では接続まで到達できなかったためです。
+That `${VAR}` is actually expanded at connection time **rests on the official documentation** and was not confirmed here. Project-scope approval requires an interactive session, and a non-interactive run could not reach the point of connecting.
 
 ---

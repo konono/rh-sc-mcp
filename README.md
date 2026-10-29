@@ -1,91 +1,93 @@
 # rh-sc-mcp
 
-Red Hat のサポートケースを Claude Code、Codex、Cursor、OpenCode から扱う MCP サーバーです。ケースの検索・参照・コメント確認ができ、設定で許可した場合は作成・更新・コメント投稿もできます。**既定は読み取り専用**です。stdio と Streamable HTTP に対応します。
+**English** · [日本語](README.ja.md)
 
-## まず使う (stdio)
+An MCP server that lets Claude Code, Codex, Cursor and OpenCode work with Red Hat support cases. It can search, read and inspect comments on cases, and — if you allow it in the configuration — create and update cases and post comments. **Read-only by default.** Both stdio and Streamable HTTP are supported.
 
-Go 1.25 以降、対応する MCP クライアント、[Red Hat の offline token](https://access.redhat.com/management/api)、ケースを参照できる Red Hat アカウントが必要です。
+## Get started (stdio)
 
-### 1. インストールと登録
+You need Go 1.25 or later, a supported MCP client, a [Red Hat offline token](https://access.redhat.com/management/api), and a Red Hat account that can see the cases you care about.
 
-インストーラを実行します。内部で `go install` を使うため、Go 1.25 以降が必要です。
+### 1. Install and register
+
+Run the installer. It uses `go install` internally, so Go 1.25 or later is required.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | sh
 ```
 
-Claude Code が見つかれば、インストーラは MCP サーバー `rh-sc` を user scope に登録します。既存の同名登録は変更しません。Codex、Cursor、OpenCode はバイナリのインストール後、各ガイドに従って登録してください。
+If Claude Code is found, the installer registers the MCP server `rh-sc` at user scope. It never modifies an existing entry of the same name. For Codex, Cursor and OpenCode, install the binary first and then register it by following the per-client guide.
 
-| クライアント | stdio の登録手順 |
+| Client | How to register for stdio |
 |---|---|
-| Claude Code | [Claude Code](docs/clients.md#stdio-で接続する) |
+| Claude Code | [Claude Code](docs/clients.md#connecting-over-stdio) |
 | Codex (CLI / IDE) | [Codex](docs/codex.md) |
 | Cursor | [Cursor](docs/cursor.md) |
 | OpenCode | [OpenCode](docs/opencode.md) |
 
-インストーラは他のクライアントの設定を変更しません。`go install` で手動インストールする方法、保存先、更新方法は[インストールと更新の詳細](docs/installation.md)を参照してください。
+The installer does not touch the configuration of any other client. For installing manually with `go install`, where the binary lands, and how to update it, see [Installing and updating](docs/installation.md).
 
-### 2. token を渡して起動
+### 2. Pass the token and start
 
-MCP クライアントを起動する環境で offline token を設定します。
+Set the offline token in the environment that starts your MCP client.
 
 ```bash
 export RH_SC_OFFLINE_TOKEN='xxxxxxxxx'
 ```
 
-`xxxxxxxxx` を実際の token に置き換えてください。実値をコマンドに直接入力するとシェル履歴に残りうる点に注意してください。
+Replace `xxxxxxxxx` with your actual token. Note that typing a real value directly into a command can leave it in your shell history.
 
-このシェルから登録したクライアントを起動し、MCP サーバー `rh-sc` が見えることを確認します。最初は「`rhcase_scope` を使って、利用可能な操作を教えて」と依頼できます。ケースを探すときは `rhcase_search` に検索語などの条件を渡してください。**条件なしの検索は API に拒否されるため、本サーバーも送信前に止めます。** GUI アプリでは起動方法によってシェルの環境変数を受け継がないことがあるため、その場合は [サーバーの設定ファイル](docs/configuration.md)に token を設定してください。
+Start the client you registered from this shell and confirm that the MCP server `rh-sc` is visible. A good first prompt is "use `rhcase_scope` and tell me what operations are available". To look for cases, pass `rhcase_search` a keyword or other criteria. **A search with no criteria is rejected by the API, so this server stops it before sending.** GUI applications do not always inherit environment variables from your shell, depending on how they are launched; in that case, put the token in [the server's configuration file](docs/configuration.md) instead.
 
-### 設定ファイル
+### Configuration file
 
-既定の場所は `~/.config/rh-sc-mcp/config.yaml` です。初回起動時にディレクトリ (`0700`) と最小構成のファイル (`0600`) が自動作成されます。例えば、token をファイルに保存し、KCS 検索も有効にする場合は次のように書きます。
+The default location is `~/.config/rh-sc-mcp/config.yaml`. On first run, the directory (`0700`) and a minimal file (`0600`) are created automatically. For example, to keep the token in the file and also enable KCS search:
 
 ```yaml
-offlineToken: "ここに Red Hat offline token"
+offlineToken: "your Red Hat offline token here"
 readOnly: true
 resources:
   kcs:
     permission: read
 ```
 
-`offlineToken` は環境変数 `RH_SC_OFFLINE_TOKEN` で渡すなら省略できます。**環境変数とファイルに同じ項目がある場合は環境変数を優先**し、他の設定はマージします。別のファイルを使う場合は `--config /path/to/config.yaml` を指定してください。全項目と権限の設定例は[設定と権限](docs/configuration.md)にあります。
+`offlineToken` can be omitted if you pass it through the environment variable `RH_SC_OFFLINE_TOKEN`. **When the same key is set in both the environment and the file, the environment wins**; everything else is merged. To use a different file, pass `--config /path/to/config.yaml`. Every key, along with permission examples, is documented in [Configuration and permissions](docs/configuration.md).
 
-## 使える機能
+## What it can do
 
-| 操作 | ツール | 既定 |
+| Operation | Tools | Default |
 |---|---|---|
-| ケースの検索・詳細表示 | `rhcase_search`, `rhcase_get` | 有効 |
-| コメントの一覧・詳細表示 | `rhcase_list_comments`, `rhcase_get_comment` | 有効 |
-| ケースの作成・更新、コメント投稿 | `rhcase_create`, `rhcase_update`, `rhcase_add_comment` | 無効 |
-| KCS ナレッジ検索 | `rhkcs_search` | 無効 |
+| Search cases, show case details | `rhcase_search`, `rhcase_get` | Enabled |
+| List comments, show one comment | `rhcase_list_comments`, `rhcase_get_comment` | Enabled |
+| Create and update cases, post comments | `rhcase_create`, `rhcase_update`, `rhcase_add_comment` | Disabled |
+| KCS knowledge base search | `rhkcs_search` | Disabled |
 
-`rhcase_scope` は常に使えます。KCS を使うには、設定ファイルに `resources.kcs.permission: read` を指定します。書き込みには `readOnly: false` と対象リソースの `permission: write` の両方が必要です。現在の権限は `rh-sc-mcp --print-scope` で確認できます。[全ツールと入出力](docs/tools.md) / [権限の詳細](docs/configuration.md#権限モデル)
+`rhcase_scope` is always available. To use KCS, set `resources.kcs.permission: read` in the configuration file. Writes require **both** `readOnly: false` and `permission: write` on the resource in question. Check what is currently granted with `rh-sc-mcp --print-scope`. [All tools and their I/O](docs/tools.md) / [Permission details](docs/configuration.md#permission-model)
 
-## HTTP・コンテナで使う
+## Using HTTP and containers
 
-HTTP ではサーバーを常駐させ、クライアントは `/mcp` に接続します。接続には **offline token とは別の共有 bearer token** が必要です。各クライアントの HTTP 登録例は [MCP クライアント一覧](docs/clients.md)、起動と保護の設定は [HTTP サーバーの運用](docs/http.md) を参照してください。
+Over HTTP the server runs as a long-lived process and clients connect to `/mcp`. The connection requires a **shared bearer token, separate from the offline token**. Per-client HTTP registration examples are in [MCP clients](docs/clients.md); startup and hardening are covered in [Running the HTTP server](docs/http.md).
 
-公開イメージ `ghcr.io/konono/rh-sc-mcp:latest` を利用できます (linux/amd64・linux/arm64)。Kubernetes / OpenShift では[デプロイガイド](docs/deployment.md)の手順で最新 Release のタグを取得し、その版に固定して配置します。Red Hat の offline token と HTTP 用 token は起動時に別途渡します。
+A published image is available as `ghcr.io/konono/rh-sc-mcp:latest` (linux/amd64 and linux/arm64). For Kubernetes / OpenShift, follow the [deployment guide](docs/deployment.md) to look up the latest release tag and pin to that version. The Red Hat offline token and the HTTP token are supplied separately at startup.
 
-## 更新と削除
+## Updating and removing
 
-`rh-sc-mcp` が PATH にない場合は、インストーラが表示した絶対パスで実行してください。
+If `rh-sc-mcp` is not on your `PATH`, run it with the absolute path the installer printed.
 
 ```bash
 rh-sc-mcp update
 rh-sc-mcp --version
 ```
 
-更新後は MCP クライアントを再起動してください。登録だけを外す、バイナリを消す、Podman や OpenShift から撤去する、資格情報を消す操作はそれぞれ別です。[アンインストール手順](docs/uninstall.md)
+Restart your MCP client after updating. Removing the client registration, deleting the binary, tearing down Podman or OpenShift, and deleting credentials are four separate operations. [Uninstall instructions](docs/uninstall.md)
 
-## 詳しく読む
+## Read more
 
-- [ドキュメント一覧](docs/README.md) — やりたいことから各ページへ
-- [設定と権限](docs/configuration.md) / [提供ツール](docs/tools.md)
-- [制限事項と検証済みの範囲](docs/limitations.md)
-- [設計・API・セキュリティ](docs/architecture.md) / [テストとリリース](docs/development.md)
+- [Documentation index](docs/README.md) — find the page for what you want to do
+- [Configuration and permissions](docs/configuration.md) / [Tools](docs/tools.md)
+- [Limitations and what has been verified](docs/limitations.md)
+- [Design, API and security](docs/architecture.md) / [Testing and releasing](docs/development.md)
 
-## ライセンス
+## License
 
 [MIT License](LICENSE) — Copyright (c) 2026 konono

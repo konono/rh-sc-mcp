@@ -1,36 +1,38 @@
-# 提供ツールと応答
+# Tools and responses
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/tools.md)
 
-## 提供ツール
+[Get started](../README.md) · [Documentation index](README.md)
 
-許可レベルを満たすものだけが登録されます。
+## Available tools
 
-| ツール | 必要権限 | 対応 API | 説明 |
+Only the tools whose permission level is satisfied get registered.
+
+| Tool | Permission required | API | Description |
 |---|---|---|---|
-| `rhcase_scope` | なし (常時) | — | 有効なエンドポイント・権限・ツール一覧・上限値を返す |
-| `rhcase_search` | `case: read` | `POST /v3/cases/filter` | キーワード・ステータス・severity・製品・担当・アカウント・期間で検索。[条件を最低 1 つ要求する](limitations.md#6-フィルタ検索は条件なしでは拒否される-仕様書に記載なし) |
-| `rhcase_get` | `case: read` | `GET /v3/cases/{caseNumber}` | ケース 1 件の詳細。コメント履歴を含む (`includeComments: false` で省略可、既定は `maxComments` 件で打ち切り) |
-| `rhcase_create` | `case: write` | `POST /v3/cases` | ケース新規作成 |
-| `rhcase_update` | `case: write` | `PUT /v3/cases/{caseNumber}` | ケースの部分更新 |
-| `rhcase_list_comments` | `comment: read` | `GET /v3/cases/{caseNumber}/comments` | コメント一覧 (日付範囲・ソート指定可) |
-| `rhcase_get_comment` | `comment: read` | `GET /v3/cases/{caseNumber}/comments/{commentId}` | コメント 1 件 |
-| `rhcase_add_comment` | `comment: write` | `POST /v3/cases/{caseNumber}/comments` | コメント投稿。`contentType` は `plaintext` (既定) / `html`、`createdByType` は `Customer` / `Associate` / `Internal` |
-| `rhkcs_search` | `kcs: read` | `POST /search/v2/kcs` | ナレッジベース検索。タイトル・種別・`viewUri`・短い抜粋に射影して返す (任意機能、既定 OFF) |
+| `rhcase_scope` | none (always on) | — | Returns the active endpoint, permissions, tool list and result limits |
+| `rhcase_search` | `case: read` | `POST /v3/cases/filter` | Search by keyword, status, severity, product, owner, account or date range. [Requires at least one criterion](limitations.md#6-filter-search-is-rejected-without-criteria-not-documented-in-the-specification) |
+| `rhcase_get` | `case: read` | `GET /v3/cases/{caseNumber}` | Details of one case, including comment history (omit with `includeComments: false`; truncated at `maxComments` by default) |
+| `rhcase_create` | `case: write` | `POST /v3/cases` | Open a new case |
+| `rhcase_update` | `case: write` | `PUT /v3/cases/{caseNumber}` | Partial update of a case |
+| `rhcase_list_comments` | `comment: read` | `GET /v3/cases/{caseNumber}/comments` | List comments (date range and sort can be specified) |
+| `rhcase_get_comment` | `comment: read` | `GET /v3/cases/{caseNumber}/comments/{commentId}` | One comment |
+| `rhcase_add_comment` | `comment: write` | `POST /v3/cases/{caseNumber}/comments` | Post a comment. `contentType` is `plaintext` (default) or `html`; `createdByType` is `Customer`, `Associate` or `Internal` |
+| `rhkcs_search` | `kcs: read` | `POST /search/v2/kcs` | Knowledge base search. Projected down to title, kind, `viewUri` and a short snippet (optional, off by default) |
 
-### 入出力の設計
+### How the inputs and outputs are designed
 
-- **ケース番号は文字列です。** `04337263` のように先頭のゼロが意味を持つため、数値にすると壊れます。入力は数字 1〜32 桁に制限しており、それ以外は **ネットワークに出る前に** 拒否されます。
-- **検索結果は要約行です。** `POST /v3/cases/filter` は 1 件ごとに `GetCaseResponse` 全体 (description とコメント履歴を含む) を返すため、そのまま 50 件返すとモデルのコンテキストを食い潰します。検索では「どのケースを開くか決めるのに必要な項目」だけに絞り、本文は `rhcase_get` で取得します。
-- **更新は差分のみ送ります。** 省略したフィールドはペイロードに含めない (= 変更しない)、空文字を渡すとクリアする、という区別をします。`summary` の空文字だけは拒否します (件名のないケースは backend 側で弾かれ、その理由が伝わらないため)。
-- **長い応答は上限で打ち切ります。** ケース検索は `maxResults` (既定 50)、コメント一覧とケース詳細に含まれるコメントは `maxComments` (既定 50)、KCS 検索は `rows` (上限 50) です。コメント API には件数パラメータが無いため、こちらは応答受信後に切り詰めます。
-- **応答の注意点は `notes` に書きます。** 件数を切り詰めた、`maxResults` を丸めた、ページがまだある、API が一部フィールドを反映しなかった、などを明示します。いずれも黙って捨てることはしません。
+- **Case numbers are strings.** Leading zeros carry meaning, as in `04337263`, so turning them into numbers breaks them. Input is limited to 1–32 digits, and anything else is rejected **before it goes on the network**.
+- **Search results are summary rows.** `POST /v3/cases/filter` returns an entire `GetCaseResponse` per case — description and comment history included — so returning 50 of those verbatim would eat the model's context. Search returns only the fields you need to decide which case to open; the body comes from `rhcase_get`.
+- **Updates send only the delta.** Omitted fields are not included in the payload (i.e. left alone), while an empty string clears the field — the two are kept distinct. The one exception is an empty `summary`, which is rejected (a case without a subject is refused by the backend, and the reason does not make it back to you).
+- **Long responses are truncated at a limit.** Case search uses `maxResults` (default 50); comment listings and the comments inside case details use `maxComments` (default 50); KCS search uses `rows` (capped at 50). The comments API has no count parameter, so that one is truncated after the response arrives.
+- **Caveats about a response go in `notes`.** Results were truncated, `maxResults` was clamped, more pages remain, the API did not apply some field — all of these are stated explicitly. None of them are dropped silently.
 
-### `rhcase_create` の戻り値
+### What `rhcase_create` returns
 
-作成 API は `201` と `{"location": ["..."]}` を返します (環境によっては `Location` ヘッダのみ、あるいは両方)。本サーバーは **ヘッダとボディの両方を見て、重複を除いたうえで、API が返した location をすべて返します**。API がどちらも返さなかった場合 (`200` + 空ボディなど) は `location` フィールド自体が出力から省かれ、代わりに `notes` で「作成は受理されたが location が無いので、再作成の前に `rhcase_search` で確認すること」を伝えます。
+The create API returns `201` and `{"location": ["..."]}` (in some environments only a `Location` header, or both). This server **looks at both the header and the body, de-duplicates, and returns every location the API gave**. If the API returned neither (for example `200` with an empty body), the `location` field is omitted from the output entirely and `notes` instead says that the creation was accepted but there is no location, so you should check with `rhcase_search` before creating it again.
 
-ケース番号は `location` の末尾セグメントから読めたときだけ `caseNumber` に入ります。仕様は location の形式を保証していないため、読めない場合は空のままにし、`notes` でその旨と次の手順を伝えます。**存在しない番号を推測して返すことはしません。**
+The case number is placed in `caseNumber` only when it could be read from the last path segment of `location`. The specification does not guarantee the shape of the location, so when it cannot be read the field is left empty and `notes` says so along with the next step. **A number that does not exist is never guessed.**
 
 ```json
 {
@@ -41,13 +43,13 @@
 }
 ```
 
-### `rhcase_update` の戻り値
+### What `rhcase_update` returns
 
-更新 API は `200` と `{"message": ..., "fieldsNotSentToSalesforce": ...}` を返します。`fieldsNotSentToSalesforce` は「ペイロードとしては受理したが backend には送らなかったフィールド」です。ここが空でない場合、更新は部分的にしか適用されていないので、`notes` で警告します。
+The update API returns `200` and `{"message": ..., "fieldsNotSentToSalesforce": ...}`. `fieldsNotSentToSalesforce` lists fields that were accepted as payload but not forwarded to the backend. When it is non-empty the update was only partially applied, so `notes` carries a warning.
 
-### `rhkcs_search` の戻り値
+### What `rhkcs_search` returns
 
-検索バックエンドの応答をそのまま返さず、**射影します**。素通しすると 1 件あたり約 10 KB (うち `abstract` が 9.4 KB) で、既定 `rows` では 1 回 62 KB になるためです。詳細と実測値は[制限事項 2](limitations.md#2-kcs-検索のレスポンス形状は仕様化されていない) にあります。
+Rather than passing the search backend's response through, it is **projected**. Passed through raw, one document is about 10 KB (9.4 KB of which is `abstract`), which makes a single call with the default `rows` 62 KB. Details and measurements are in [limitation 2](limitations.md#2-the-shape-of-the-kcs-search-response-is-not-specified).
 
 ```json
 {
@@ -71,9 +73,9 @@
 }
 ```
 
-- `snippet` は `abstract` を **Unicode 文字数で 300 文字**に切り詰めたものです。切り詰めた場合のみ `snippetTruncated` が付きます。
-- `viewUri` は API の `view_uri` を**そのまま**通した値です。開けるかどうかは本サーバーでは確認していません。
-- `numFoundExact` はバックエンドの申告です。`false` の場合、`numFound` は概数なので `notes` でもその旨を伝えます。
-- 応答が既知の Solr 形でなかった場合は `documents` が空になり、代わりに `unrecognizedShape` が入ります。中身は `topLevelKeys` / `sizeBytes` / 説明だけで、**本文は一切含めません**。
+- `snippet` is `abstract` truncated to **300 Unicode characters**. `snippetTruncated` is only present when truncation happened.
+- `viewUri` is the API's `view_uri` passed through **verbatim**. Whether it opens is not something this server checks.
+- `numFoundExact` is the backend's own claim. When it is `false`, `numFound` is approximate and `notes` says so.
+- If the response is not in the known Solr shape, `documents` comes back empty and `unrecognizedShape` is returned instead. That contains only `topLevelKeys` / `sizeBytes` / a description — **never any of the content**.
 
 ---

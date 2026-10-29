@@ -155,8 +155,9 @@ func newStubAPI(t *testing.T) *stubAPI {
 					"view_uri":         "https://access.redhat.com/solutions/7890",
 					"resource_uri":     "https://api.access.redhat.com/support/solutions/7890",
 					"uri":              "solutions/7890",
-					// Long enough to be cut, as the live abstract was.
-					"abstract": strings.Repeat("せつめい", 200),
+					// Declared next to the test that depends on both
+					// its length and its encoding.
+					"abstract": multiByteAbstract,
 					// Internal fields the projection must drop.
 					"_version_":                        1234567890,
 					"granite_r2_vector_field_set":      true,
@@ -1247,6 +1248,20 @@ func TestKCSSearchProjectsDocuments(t *testing.T) {
 	}
 }
 
+// multiByteAbstract is the abstract the KCS stub serves. Two properties
+// of it matter, and the test below asserts on both.
+//
+// It is longer than the snippet limit, as the live abstract was, so
+// every response exercises truncation.
+//
+// Its characters are not all one byte. The limit is counted in runes
+// (redhat.KCSSnippetRunes), and against an all-ASCII abstract the
+// rune-count assertion would pass whether the implementation counted
+// runes or bytes, because there the two are the same number. The ASCII
+// prefix keeps the string legible at a glance; the katakana is what
+// makes a byte-based cut come up short.
+var multiByteAbstract = strings.Repeat("multibyte-マルチバイト-", 60)
+
 // The measured problem: one live document was 10 KB, 93% of it the
 // abstract, and the backend's default of ten rows made a 39 KB result.
 // The projection has to drop the bulk and say that it did.
@@ -1274,10 +1289,10 @@ func TestKCSSearchDropsBulkFieldsAndCutsTheSnippet(t *testing.T) {
 	decodeResult(t, res, &got)
 	d := got.Documents[0]
 	if !d.SnippetTruncated {
-		t.Fatal("a 200-character abstract was not reported as truncated")
+		t.Fatalf("an abstract of %d runes was not reported as truncated",
+			utf8.RuneCountInString(multiByteAbstract))
 	}
-	// Counted in runes: the stub's abstract is multi-byte, and cutting
-	// by bytes would both mangle it and leave a different length.
+	// In runes, not bytes -- see multiByteAbstract above.
 	if n := utf8.RuneCountInString(d.Snippet); n != redhat.KCSSnippetRunes() {
 		t.Errorf("snippet is %d runes, want %d", n, redhat.KCSSnippetRunes())
 	}

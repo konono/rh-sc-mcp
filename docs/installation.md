@@ -1,81 +1,83 @@
-# インストールと更新の詳細
+# Installing and updating in detail
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/installation.md)
 
-## インストールと更新
+[Get started](../README.md) · [Documentation index](README.md)
 
-通常は `install.sh` を使います。スクリプトは `go install` でバイナリを配置し、Claude Code が見つかれば MCP サーバーも登録します。
+## Installing and updating
+
+Normally you use `install.sh`. The script places the binary with `go install` and, if Claude Code is found, also registers the MCP server.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/konono/rh-sc-mcp/main/install.sh | sh
 ```
 
-**Go 1.25 以降が必要です。** インストーラも更新コマンドも `go install` を使います。旧 `INSTALL_DIR` は使えず、保存先を変える場合は `GOBIN` を指定してください。
+**Go 1.25 or later is required.** Both the installer and the update command use `go install`. The old `INSTALL_DIR` is gone; to change where the binary lands, set `GOBIN`.
 
-| 状況 | 振る舞い |
+| Situation | Behaviour |
 |---|---|
-| Go が無い | インストールせず、入手先と `go install` コマンドを表示して終了 |
-| Claude Code が無い | **インストールは成功**。登録は行わず、後から実行するコマンドを表示 |
-| `rh-sc` が未登録 | `--scope user` で登録。登録内容と scope を表示 |
-| `rh-sc` が登録済み | **scope を問わず一切変更しません。** 現在の Scope と Command を表示 |
-| 登録済みでパスが違う | 上に加えて、インストール先と登録先の両方を示す |
-| 登録済みで scope が `local` / `project` | 上に加えて、`user` scope へ移す `remove` / `add` 手順を表示 (実行はしません) |
+| Go is missing | Installs nothing; prints where to get Go and the `go install` command, then exits |
+| Claude Code is missing | **Installation still succeeds.** No registration is performed; the command to run later is printed |
+| `rh-sc` is not registered | Registers it with `--scope user`. Prints what was registered and at which scope |
+| `rh-sc` is already registered | **Changes nothing, at any scope.** Prints the current Scope and Command |
+| Already registered at a different path | As above, plus both the install path and the registered path |
+| Already registered at `local` / `project` scope | As above, plus the `remove` / `add` steps to move it to `user` scope (it does not run them) |
 
-登録の scope は **`user`** です。`install.sh` は任意のディレクトリから実行されるため、`local` だとそのディレクトリにだけ登録されてしまいます。[Claude Code の手動登録手順](clients.md#stdio-で接続する)も `user` に揃えてあります。**`claude mcp add` 自体の既定は `local`** なので、手で登録するときに `--scope` を省くと実行したディレクトリ限定になる点に注意してください。
+The registration scope is **`user`**. `install.sh` can be run from any directory, so `local` would register the server only in that one directory. The [manual Claude Code registration steps](clients.md#connecting-over-stdio) use `user` as well. Note that **`claude mcp add` itself defaults to `local`**, so omitting `--scope` when registering by hand limits the server to the directory you ran it in.
 
-既存の登録が `local` / `project` scope だった場合も、`install.sh` はそれを書き換えません。パスが一致していても「そのディレクトリでしか使えない」状態は残るため、`user` scope へ移すコマンドを表示します。移行は scope を持つディレクトリで実行してください。scope の判定は `claude mcp get` が出す `Scope` 行の先頭語 (`Local` / `Project`) で行い、**認識できない表記のときは何も表示しません** — 誤った移行手順を出すよりは黙るほうが安全なためです。
+If an existing entry is at `local` / `project` scope, `install.sh` does not rewrite it either. Even when the path matches, the "only usable in that directory" situation remains, so the script prints the commands to move it to `user` scope. Run the migration from the directory that owns the scope. Scope is detected from the first word of the `Scope` line that `claude mcp get` prints (`Local` / `Project`), and **when the wording is not recognised, nothing is printed** — staying silent is safer than printing the wrong migration steps.
 
-このスクリプトが自動登録するのは Claude Code だけです。Codex、Cursor、OpenCode を使う場合は、同じ `go install` 済みバイナリを[各クライアントの手順](clients.md)で登録してください。どのクライアントでもサーバー側の権限設定は共通です。
+This script only auto-registers Claude Code. For Codex, Cursor and OpenCode, register the same `go install`-ed binary using [the per-client instructions](clients.md). The server-side permission settings are the same for every client.
 
-**offline token は Claude Code の設定に書き込みません。** 登録に含めるのはバイナリの絶対パスだけで、token は Claude Code を起動したプロセスの環境、または本サーバー自身の設定ファイルから渡します。
+**The offline token is never written into Claude Code's configuration.** The registration contains only the absolute path to the binary; the token comes from the environment of the process that launched Claude Code, or from this server's own configuration file.
 
-Claude Code の登録に失敗しても、`go install` の成否とは分けて報告します。インストールが済んでいれば、登録だけ後から手動で行えます。
+If Claude Code registration fails, it is reported separately from the success or failure of `go install`. Once the installation is done, you can perform the registration by hand later.
 
-### `go install` で手動インストールする場合
+### Installing manually with `go install`
 
-インストーラを使わず、バイナリだけを入れることもできます。この方法では MCP クライアントへの登録は行いません。
+You can also install just the binary without the installer. This does not register the server with any MCP client.
 
 ```bash
 go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest
 
-# GOBIN があればそこ、無ければ GOPATH の先頭要素の bin/ に入る
+# Goes to GOBIN if set, otherwise to bin/ under the first element of GOPATH
 GO_BIN_PATH="$(go env GOBIN)"
 if [ -z "$GO_BIN_PATH" ]; then GO_BIN_PATH="$(go env GOPATH | cut -d: -f1)/bin"; fi
 "$GO_BIN_PATH/rh-sc-mcp" --version
 
-# 以下の例で rh-sc-mcp とだけ入力できるようにする
+# So that the examples below can just say rh-sc-mcp
 export PATH="$GO_BIN_PATH:$PATH"
 ```
 
-`go install ...@latest` は公開済み Go モジュールの最新タグから取得します。`GOPATH` は複数要素を持てますが、`go install` が書くのは先頭要素です。MCP クライアントには、このバイナリの絶対パスを登録してください。
+`go install ...@latest` fetches the latest tag of the published Go module. `GOPATH` can hold several elements, but `go install` writes to the first one. Register the absolute path of this binary with your MCP client.
 
-以後の更新は、インストール済みのコマンドで行えます。
+From then on you can update using the installed command itself.
 
 ```bash
 rh-sc-mcp update
 rh-sc-mcp --version
 ```
 
-`update` は `go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest` を実行します。インストールと更新を同じ経路に揃えるためです。Go の既定設定であれば、ダウンロードしたモジュールはチェックサムデータベース (`sum.golang.org`) に照合されます。ただしこれは**利用者側の設定に依存します** — `GOSUMDB=off` や、このモジュールのパスに一致する glob が `GOPRIVATE` / `GONOSUMDB` に設定されていれば照合は行われません。環境の設定は `go env GOSUMDB GOPRIVATE GONOSUMDB` で確認できます。Red Hat の認証情報や設定ファイルは不要です。更新後は Claude Code などの MCP クライアントを再起動してください。
+`update` runs `go install github.com/konono/rh-sc-mcp/cmd/rh-sc-mcp@latest`, so that installing and updating take the same path. With Go's default settings, downloaded modules are checked against the checksum database (`sum.golang.org`). That however **depends on your own configuration** — no check happens if `GOSUMDB=off` is set, or if a glob matching this module path appears in `GOPRIVATE` / `GONOSUMDB`. Inspect your environment with `go env GOSUMDB GOPRIVATE GONOSUMDB`. No Red Hat credentials or configuration file are needed. Restart Claude Code or any other MCP client after updating.
 
-**実行前に、`go install` の書き込み先と現在動いているバイナリが同じかを確認します。** `go install` は起動元に関係なく `GOBIN` / `GOPATH` 先頭の `bin/` へ書くので、別の場所にコピーしたバイナリから実行すると「更新成功」と出たのに動かしているファイルは古いまま、という状態になり得ます。一致しない場合は**何もインストールせずに停止し**、両方のパスと手動手順を表示します。
+**Before it runs, the command checks that `go install`'s destination and the currently running binary are the same file.** `go install` writes to `GOBIN` / the first `GOPATH`'s `bin/` regardless of where it is invoked from, so if you run a copy of the binary from somewhere else you can end up seeing "update succeeded" while the file you actually run stays old. On a mismatch the command **installs nothing and stops**, printing both paths and the manual steps.
 
-シンボリックリンク経由の実行は同じファイルを指すので通ります。一方**ハードリンクは拒否します** — `go install` は rename で置き換えるため、別名のハードリンクは古い内容のまま残るからです (実測確認済み)。
+Running through a symlink resolves to the same file and is accepted. **Hard links are rejected**, however — `go install` replaces the file with a rename, so a second hard-linked name keeps the old content (confirmed by measurement).
 
-更新後は、インストールされたバイナリに `--version` を実行して結果を確かめます。版が上がっていれば更新として報告し、同じなら「最新」と報告します。**`@latest` が古い版を指した場合 (タグの取り下げ等) は、更新ではなくダウングレードとしてエラーで報告します** — この時点でバイナリは既に置き換わっているため、黙って成功と表示しません。
+After updating, `--version` is run against the installed binary and the result is checked. If the version went up it is reported as an update; if it is the same, it is reported as already current. **If `@latest` resolves to an older version (a withdrawn tag, say), it is reported as an error — a downgrade, not an update** — because at that point the binary has already been replaced, and silently reporting success would be wrong.
 
-Go ツールチェーンが必要です。`go` が見つからない場合は、入手先と実行すべきコマンドを表示して終了します。
+The Go toolchain is required. If `go` is not found, the command prints where to get it and what to run, then exits.
 
-開発中のソースからビルド・検証する場合は次のコマンドを使います。`make install` も Go のインストール先へ入れますが、**チェックアウトしたソース**をビルドするため、公開版を使う人は上の `go install ...@latest` を使ってください。
+To build and verify from a source checkout during development, use the following. `make install` also places the binary in Go's install location, but it builds **the source you have checked out**, so if you just want the published version use `go install ...@latest` above.
 
 ```bash
-# ビルド (bin/rh-sc-mcp が生成される)
+# Build (produces bin/rh-sc-mcp)
 make build
 
-# このチェックアウトから Go のインストール先へ配置
+# Install from this checkout into Go's install location
 make install
 
-# テスト・整形・静的解析
+# Test, format, static analysis
 make test
 make fmt
 make vet

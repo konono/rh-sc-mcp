@@ -1,14 +1,16 @@
-# 制限事項と実測範囲
+# Limitations and verified scope
 
-[使い始める](../README.md) · [ドキュメント一覧](README.md)
+**English** · [日本語](ja/limitations.md)
 
-## 制限事項と未確認事項
+[Get started](../README.md) · [Documentation index](README.md)
 
-ここに書いてあるのは「確認できていないこと」です。確認済みのように書かないために分けてあります。
+## Limitations and unverified areas
 
-### 1. 仕様書自身の不整合: `SolrSearchRequest` の `exp`
+What is written here is what has *not* been confirmed. It is kept separate so that it is never presented as if it had been.
 
-`/search/v2/kcs` のリクエストボディ `SolrSearchRequest` は `required: ["q", "exp"]` と宣言していますが、`properties` に `exp` は存在せず、あるのは `expression` です。
+### 1. An inconsistency in the specification itself: `exp` in `SolrSearchRequest`
+
+The request body for `/search/v2/kcs`, `SolrSearchRequest`, declares `required: ["q", "exp"]`, but `exp` does not exist in `properties`; what exists is `expression`.
 
 ```json
 "SolrSearchRequest": {
@@ -17,22 +19,22 @@
 }
 ```
 
-**この不整合は実 API で決着しました** (2026-10-25、`rows: 1` の読み取りのみ)。
+**This inconsistency was settled against the real API** (2026-10-25, reads only, with `rows: 1`).
 
-| 送ったボディ | 結果 |
+| Body sent | Result |
 |---|---|
-| `{q, rows}` | `200` — **`exp` は必須ではない** |
-| `{q, rows, expression}` | `200` — 構造は上と同一。`expression` は受理される |
-| `{q, rows, exp}` | **`500`** — `exp` を送ると壊れる |
-| `{q, rows, clientName}` (本実装が送る形) | `200` |
+| `{q, rows}` | `200` — **`exp` is not required** |
+| `{q, rows, expression}` | `200` — identical structure to the above. `expression` is accepted |
+| `{q, rows, exp}` | **`500`** — sending `exp` breaks it |
+| `{q, rows, clientName}` (what this implementation sends) | `200` |
 
-つまり仕様書の `required: ["q", "exp"]` は二重に誤っています。`exp` は必須でないばかりか、**仕様書どおりに送ると `500` になります**。本実装は `expression` のみを送り `exp` を送らないので正しく、`SolrSearchRequest` に `exp` フィールドを足してはいけません。テストで送信ボディに `exp` が現れないことを固定しています。
+So the specification's `required: ["q", "exp"]` is wrong twice over. Not only is `exp` not required — **following the specification literally produces a `500`**. This implementation sends only `expression` and never `exp`, which is correct, and an `exp` field must not be added to `SolrSearchRequest`. A test pins the absence of `exp` in the request body.
 
-なお `500` 時のエラー本文は `{message, detailMessage}` で、ケース API と同じ `LegacyApiErrorResponse` としてデコードできました。
+Incidentally, the error body for the `500` was `{message, detailMessage}`, decodable as the same `LegacyApiErrorResponse` the case API uses.
 
-### 2. KCS 検索のレスポンス形状は仕様化されていない
+### 2. The shape of the KCS search response is not specified
 
-`/search/v2/kcs` の `200` は `"description": "Solr Response"` のみで、スキーマが定義されていません。**仕様書に書かれていないので、以下は実測した形です** (2026-10-25)。
+The `200` for `/search/v2/kcs` carries only `"description": "Solr Response"` with no schema defined. **Since the specification does not say, the following is what was measured** (2026-10-25).
 
 ```
 responseHeader: {status, QTime, zkConnected, params}
@@ -40,144 +42,144 @@ response:       {docs[], numFound, start, maxScore, numFoundExact}
 spellcheck:     {}
 ```
 
-`docs[]` の 1 件は 26 フィールドありました。内訳が問題で、**`abstract` だけで 10,076 B 中 9,401 B (93%)** を占め、ほかに同内容のタイトルが 4 種 (`publishedTitle` / `allTitle` / `title` / `sortTitle`)、URI が 3 種、ベクトル索引の内部フラグ (`*_vector_field_set` 等) が並びます。素通しすると API の既定 `rows=10` で 1 回 62 KB になります。
+One entry in `docs[]` had 26 fields. The breakdown is the problem: **`abstract` alone accounted for 9,401 B of 10,076 B (93%)**, alongside four copies of the same title (`publishedTitle` / `allTitle` / `title` / `sortTitle`), three URIs, and internal vector-index flags (`*_vector_field_set` and similar). Passed through raw, the API's default `rows=10` makes one call 62 KB.
 
-そこで `rhkcs_search` は**射影して返します** — `id` / `title` (4 種から 1 つ) / `documentKind` / `language` / `lastModifiedDate` / `viewUri` / `snippet` と、`numFound` / `numFoundExact` / `start` / 返却件数。実レスポンスに対する実測で **`rows=1` が 13,435 B → 684 B、`rows=10` が 62,436 B → 11,364 B** になります。
+So `rhkcs_search` **returns a projection** — `id` / `title` (one of the four) / `documentKind` / `language` / `lastModifiedDate` / `viewUri` / `snippet`, plus `numFound` / `numFoundExact` / `start` / the number returned. Measured against real responses, **`rows=1` goes from 13,435 B to 684 B and `rows=10` from 62,436 B to 11,364 B**.
 
-- `snippet` は `abstract` を **Unicode 文字数で 300 文字**に切り詰めたものです (バイト数ではないので、日本語でも英語でも同じ文字数になります)。切り詰めた場合は `snippetTruncated` が立ち、`notes` にも出ます。
-- `viewUri` は API の `view_uri` を**そのまま**通した値です。絶対 URL かどうか、セッションなしで開けるかどうかは本サーバーでは確認していません。
-- `numFoundExact` も返します。`numFound` が概数の場合、API 自身がそう申告するためです。
+- `snippet` is `abstract` truncated to **300 Unicode characters** (characters, not bytes, so the count is the same for English and Japanese). When truncation happens, `snippetTruncated` is set and it is also mentioned in `notes`.
+- `viewUri` is the API's `view_uri` passed through **verbatim**. Whether it is an absolute URL, and whether it opens without a session, is not checked by this server.
+- `numFoundExact` is returned too, because the API itself declares when `numFound` is approximate.
 
-**未知形状時の扱い**: 仕様化されていない以上、形が変わることは例外ではなく想定内です。`response.docs` が無い、あるいは配列として読めない場合は射影を行わず、`unrecognizedShape` として **`topLevelKeys` / `sizeBytes` / 説明だけ**を返します。**本文は一切含めません** — 未知のペイロードをモデルのコンテキストに流し込むより、形が変わったことを正確に伝えて人が見にいくほうが有用なためです。これはエラーではなく通常の結果として返ります。
+**Handling of unknown shapes**: since the shape is unspecified, it changing is expected rather than exceptional. If `response.docs` is missing or cannot be read as an array, no projection is attempted and an `unrecognizedShape` is returned containing **only `topLevelKeys` / `sizeBytes` / a description**. **None of the content is included** — telling you precisely that the shape changed, so a human can go look, is more useful than pouring an unknown payload into the model's context. This comes back as a normal result, not an error.
 
-`rhkcs_search` が既定 OFF なのは変わりません。ケース管理とは別の API 面であり、レスポンスが仕様化されていない点も含めて明示的な opt-in を求めます。
+`rhkcs_search` remains off by default. It is a different API surface from case management, and the unspecified response shape is one more reason to require an explicit opt-in.
 
-### 3. コンソール URL は既定値を持たない
+### 3. The console URL has no default
 
-人間向けのケース閲覧 URL (`https://.../support/cases/#/case/<番号>` のような形) は、公開 API 仕様のどこにも書かれていません。当初はこの形を組み立てていましたが、**根拠がないため既定値を削除しました**。
+The human-facing case URL (something like `https://.../support/cases/#/case/<number>`) appears nowhere in the published API specification. This form was assembled at first, but **the default was removed because there is no basis for it**.
 
-- 未設定時: ツール出力に `caseUrl` は現れません。代わりに API 自身が返した `uri` (ケース) と `location` (作成時) が入ります。
-- 設定時 (`caseViewURL`): ケース番号を最後のパスセグメントとして連結した URL を `caseUrl` として返します。この値の正しさは設定した operator の責任です。
+- Unset: `caseUrl` does not appear in tool output. Instead you get the `uri` (for a case) and `location` (on creation) that the API itself returned.
+- Set (`caseViewURL`): a URL is returned as `caseUrl`, formed by appending the case number as the final path segment. The correctness of that value is the configuring operator's responsibility.
 
-### 4. `apiVersion: v1` では同じケースを取得できませんでした
+### 4. With `apiVersion: v1`, the same case could not be fetched
 
-仕様書には `/v1/cases` 系のパスも存在し、設定で切り替えられるようにしてありますが、本実装が想定・テストしているのは `v3` です。`v1` を指定すると起動時に警告が出ます。
+The specification also contains `/v1/cases` paths, and the version is configurable, but what this implementation assumes and tests is `v3`. Specifying `v1` produces a startup warning.
 
-2026-10-26 に read 経路だけを実測した結果は次のとおりです (この環境の資格情報での 1 回限りの観測です)。
+Here is what measuring the read paths on 2026-10-26 produced (a one-off observation with this environment's credentials).
 
-| 呼び出し | 結果 |
+| Call | Result |
 |---|---|
-| `POST /v1/cases/filter` (`keyword` が短い) | `400`。`{message, detailMessage}` で「Search string too short」。**v3 は同じ語を 200 で受理**します |
-| `POST /v1/cases/filter` (通常の語) | `200`。ただし `totalCount: 0` のみで `cases` キー自体がない |
-| `POST /v1/cases/filter` (`caseNumbers` に既知の番号) | `200` / `totalCount: 0` / 0 件。**同じ条件で v3 は `totalCount: 1` / 1 件** |
-| `GET /v1/cases/{caseNumber}` (v3 が 200 を返す番号) | `404`「Unable to find case by number」 |
-| `GET /v1/cases/{n}/comments` (同上) | `404` |
+| `POST /v1/cases/filter` (short `keyword`) | `400`, `{message, detailMessage}`, "Search string too short". **v3 accepts the same word with a 200** |
+| `POST /v1/cases/filter` (ordinary word) | `200`, but only `totalCount: 0` with no `cases` key at all |
+| `POST /v1/cases/filter` (a known number in `caseNumbers`) | `200` / `totalCount: 0` / zero results. **v3 returns `totalCount: 1` and one result for the same query** |
+| `GET /v1/cases/{caseNumber}` (a number v3 returns 200 for) | `404`, "Unable to find case by number" |
+| `GET /v1/cases/{n}/comments` (same) | `404` |
 
-**この資格情報では、v3 で取得できるケースを v1 からは取得できませんでした。** 同一トークン・同一ケース番号で v3 側は `200` (ケース本体 73 キー、comments は配列) を返します。
+**With these credentials, cases retrievable through v3 could not be retrieved through v1.** With the same token and the same case number, v3 returns `200` (the case body with 73 keys, comments as an array).
 
-**理由は確定していません。** v1 のデータ範囲が異なる、このアカウントに v1 の権限がない、当該パスが実質的に非対応になっている、などが考えられますが、応答からは区別できません。「v1 の read 経路が壊れている」と一般化できる材料もありません。
+**The reason has not been established.** v1's data scope could differ, this account might lack v1 access, or those paths might be effectively unsupported — the responses do not let you tell these apart. Nor is there material for generalising to "v1's read path is broken".
 
-エラー応答は `message` と `detailMessage` の 2 キーで、本実装の `LegacyApiErrorResponse` の部分集合なのでデコードできます。`200` の filter 応答も `cases` が無いだけで `FilterCasesResponse` としてデコードでき、0 件として扱われます。一方、**v1 の成功時のケース本体は取得できていないため、`Case` 型でデコードできるかは未確認**です。
+The error responses have two keys, `message` and `detailMessage`, a subset of this implementation's `LegacyApiErrorResponse`, so they decode. The `200` filter response also decodes as `FilterCasesResponse`, just without `cases`, and is treated as zero results. **Whether a successful v1 case body decodes as the `Case` type is unverified**, because none was ever obtained.
 
-#### この挙動は本サーバー経由でも同じです
+#### The same behaviour appears through this server
 
-上の表は HTTP を直接叩いた結果ですが、`RH_SC_API_VERSION=v1` を設定した本バイナリでも同じでした。
+The table above came from hitting HTTP directly, but the binary with `RH_SC_API_VERSION=v1` behaved identically.
 
-- `--print-scope` は `apiVersion: v1` を報告し、起動時に警告が出ます
-- `--check-auth` の `endpoint` は `.../support/v1` になります
-- MCP 経由の `rhcase_search` は**エラーにならず `totalCount: 0` / 0 件**を返します
+- `--print-scope` reports `apiVersion: v1` and a startup warning appears
+- `--check-auth` shows `endpoint` as `.../support/v1`
+- `rhcase_search` over MCP returns **`totalCount: 0` and zero results, without an error**
 
-**ここが運用上の落とし穴です。** `--check-auth` は `v1` でも `tokenExchange: ok` / `apiProbe: ok` を返します。プローブは filter を呼んでおり、v1 の filter は `200` を返すからです。つまり **`--check-auth` の `ok` は「資格情報が受理された」ことだけを意味し、その `apiVersion` でケースを取得できることは意味しません**。v1 では `GET /v1/cases/{n}` が `404` を返す状態でも `ok` になります。同じ理由で、`rhcase_search` が 0 件を返しても「該当なし」なのか「このバージョンでは取得できない」なのかは区別がつきません。
+**This is the operational trap.** `--check-auth` returns `tokenExchange: ok` / `apiProbe: ok` even on `v1`, because the probe calls filter and v1's filter returns `200`. In other words, **`ok` from `--check-auth` means only "the credentials were accepted", not "cases can be retrieved at this `apiVersion`"**. It says `ok` even while `GET /v1/cases/{n}` returns `404`. For the same reason, zero results from `rhcase_search` cannot be distinguished between "no matches" and "not retrievable at this version".
 
-実運用では `v3` (既定) を使ってください。
+Use `v3` (the default) in production.
 
-### 5. 実 API の確認範囲 — 読み取りは確認済み、書き込みは未確認
+### 5. What has been checked against the real API — reads verified, writes not
 
-自動テストはすべて `httptest` のスタブに対するものです。スタブは公開仕様から起こしたものなので、**それ自体では仕様と実 API の食い違いを検出できません** (実際に 1 件見つかりました。[制限事項 6](#6-フィルタ検索は条件なしでは拒否される-仕様書に記載なし))。
+Every automated test runs against `httptest` stubs. The stubs were written from the published specification, so **by themselves they cannot detect a divergence between the specification and the real API** (one was in fact found; see [limitation 6](#6-filter-search-is-rejected-without-criteria-not-documented-in-the-specification)).
 
-実エンドポイントに対しては、2026-10-24〜25 に有効な offline token で以下を確認しました。
+Against the real endpoints, the following was confirmed with a valid offline token on 2026-10-24 and 25.
 
-| 確認したこと | 結果 |
+| What was checked | Result |
 |---|---|
-| SSO のトークン交換 | 成功。Bearer token が発行され `expires_in` は `900` |
-| SSO のエラー応答の形 | `{"error":"invalid_grant","error_description":"..."}` + `400`。本実装の `ssoError` と一致 |
-| v3 パスのルーティング | `/support/v3/...` が実際に到達する (認証済みリクエストが `200` を返した) |
-| `POST /v3/cases/filter` | `200`。`{totalCount, cases}` の形で、DTO のキーが仕様書と整合 |
-| `GET /v3/cases/{caseNumber}` | `200`。73 キーのオブジェクトが返り、ケース番号が一致 |
-| `GET /v3/cases/{n}/comments` | `200`。配列 (コメントなしのケースでは空配列) |
-| `GET /v3/cases/{n}/comments/{id}` | `200`。id が一致するオブジェクト |
-| MCP 経由の実動作 | Go SDK の `CommandTransport` で実プロセスに接続。`tools/list` は 5 件で write ツールは非表示、`rhcase_search` / `rhcase_get` / `rhcase_list_comments` が成功 |
-| `--check-auth` (成功経路) | 固定キーワードを付けた修正版が exit 0 / `tokenExchange: ok` / `apiProbe: ok` / `error` なし |
-| `--check-auth` (失敗経路) | 受理されない値では exit 1 / `tokenExchange: failed` / `apiProbe: skipped`。いずれの経路でも認証情報の露出なし |
-| `POST /search/v2/kcs` | `200`。`{responseHeader, response, spellcheck}` の Solr 形。`exp` を送った場合のみ `500` ([制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない)) |
+| SSO token exchange | Succeeded. A Bearer token was issued with `expires_in` of `900` |
+| Shape of SSO error responses | `{"error":"invalid_grant","error_description":"..."}` with `400`. Matches this implementation's `ssoError` |
+| Routing of the v3 paths | `/support/v3/...` is actually reached (an authenticated request returned `200`) |
+| `POST /v3/cases/filter` | `200`. Shape `{totalCount, cases}`, with DTO keys consistent with the specification |
+| `GET /v3/cases/{caseNumber}` | `200`. An object with 73 keys, with a matching case number |
+| `GET /v3/cases/{n}/comments` | `200`. An array (empty for a case with no comments) |
+| `GET /v3/cases/{n}/comments/{id}` | `200`. An object with a matching id |
+| Real behaviour over MCP | Connected to a real process with the Go SDK's `CommandTransport`. `tools/list` returned 5 tools with no write tools; `rhcase_search` / `rhcase_get` / `rhcase_list_comments` succeeded |
+| `--check-auth` (success path) | With the fixed keyword added, exit 0, `tokenExchange: ok`, `apiProbe: ok`, no `error` |
+| `--check-auth` (failure path) | With an unacceptable value, exit 1, `tokenExchange: failed`, `apiProbe: skipped`. No credential exposure on either path |
+| `POST /search/v2/kcs` | `200`. Solr shape `{responseHeader, response, spellcheck}`. `500` only when `exp` is sent ([limitation 1](#1-an-inconsistency-in-the-specification-itself-exp-in-solrsearchrequest) / [2](#2-the-shape-of-the-kcs-search-response-is-not-specified)) |
 
-`GET /v3/cases/{caseNumber}` が返す 73 キーに対し、本実装の `Case` 型は意味のあるフィールドだけを取る射影です ([対象 API](architecture.md#対象-api) 参照)。未知のキーは無視されるので、仕様書に無いフィールドが増えてもデコードは壊れません。
+Against the 73 keys returned by `GET /v3/cases/{caseNumber}`, this implementation's `Case` type is a projection that takes only the meaningful fields (see [The API surface](architecture.md#the-api-surface)). Unknown keys are ignored, so decoding does not break when fields not in the specification appear.
 
-**v3 ケース API のうち未確認なのは書き込み経路です** — `POST /v3/cases` (作成)、`PUT /v3/cases/{n}` (更新)、`POST /v3/cases/{n}/comments` (コメント投稿)。これらは実行するとサポートケースに取り消せない変更が残るため、読み取りの確認とは別に、対象を決めた上で明示的に実施する必要があります。[ツールの詳細](tools.md)にある作成・更新・コメントの応答形状は、現時点では**公開仕様書のみを根拠としています**。
+**What remains unverified in the v3 case API is the write paths** — `POST /v3/cases` (create), `PUT /v3/cases/{n}` (update) and `POST /v3/cases/{n}/comments` (post a comment). Running those leaves irreversible changes on a support case, so they need to be done deliberately against a chosen target, separately from read verification. The create, update and comment response shapes described in [Tools](tools.md) currently rest **on the published specification alone**.
 
-`POST /search/v2/kcs` は読み取りで確認済みです (上表、および[制限事項 1](#1-仕様書自身の不整合-solrsearchrequest-の-exp) / [2](#2-kcs-検索のレスポンス形状は仕様化されていない))。ただし確認したのは `rows` を絞った一般的な検索語での 1 系統だけで、`expression` に凝った Solr 式を渡した場合の挙動や、返りうるフィールドの全体像は把握していません。`apiVersion: v1` の read 経路も実測しましたが、この資格情報では v3 で取得できるケースを取得できませんでした ([制限事項 4](#4-apiversion-v1-では同じケースを取得できませんでした))。
+`POST /search/v2/kcs` has been verified for reads (see the table above and [limitation 1](#1-an-inconsistency-in-the-specification-itself-exp-in-solrsearchrequest) / [2](#2-the-shape-of-the-kcs-search-response-is-not-specified)). That said, only one path was checked — an ordinary search term with `rows` kept small — so the behaviour of an elaborate Solr expression in `expression`, and the full set of fields that can come back, are not known. The `v1` read path was also measured, but with these credentials cases retrievable through v3 could not be retrieved ([limitation 4](#4-with-apiversion-v1-the-same-case-could-not-be-fetched)).
 
-#### `invalid_grant` が返るとき
+#### When `invalid_grant` comes back
 
-開発中に 41 バイトのファイル (40 文字 + 改行) に入った値を渡したところ、SSO は `400 invalid_grant: Invalid refresh token` を返しました。**実測として言えるのはこれだけです** — この応答から、その値がどういう形式だったか、失効していたのか取り消されていたのか、そもそも offline token だったのかは区別できません。SSO はいずれの場合も同じ `invalid_grant` を返します。
+During development, passing a value from a 41-byte file (40 characters plus a newline) made SSO return `400 invalid_grant: Invalid refresh token`. **That is the entire measurement** — the response does not tell you what form the value had, whether it had expired or been revoked, or whether it was an offline token at all. SSO returns the same `invalid_grant` in every one of those cases.
 
-`--check-auth` が `invalid_grant` を返す場合は、[Red Hat 公式の API Tokens ページ](https://access.redhat.com/management/api) で発行した offline token に差し替えたうえで、末尾改行が混入していないかを確認してください。
+If `--check-auth` returns `invalid_grant`, replace the token with one issued from [Red Hat's official API Tokens page](https://access.redhat.com/management/api) and check that no trailing newline crept in.
 
-### 6. フィルタ検索は条件なしでは拒否される (仕様書に記載なし)
+### 6. Filter search is rejected without criteria (not documented in the specification)
 
-`POST /v3/cases/filter` に `{"maxResults": 1}` だけを送ると、API は `400 No valid external filter criteria provided` を返します。**ページングやソートは検索条件として数えられません。** この挙動は `FilterCasesV3Request` のどこにも書かれておらず、必須フィールドの宣言もありません (2026-10-25 に実 API で確認)。
+Sending only `{"maxResults": 1}` to `POST /v3/cases/filter` makes the API return `400 No valid external filter criteria provided`. **Paging and sorting do not count as search criteria.** This behaviour appears nowhere in `FilterCasesV3Request`, which declares no required fields either (confirmed against the real API on 2026-10-25).
 
-本実装はこれに 2 つの形で対応しています。
+This implementation handles it in two ways.
 
-- `rhcase_search` は、条件が 1 つもない呼び出しを**送信前に拒否**し、何を足せばよいかを述べます。API の `400` をそのまま返すと、どの引数が足りないのか分からないためです。
-- `--check-auth` のプローブは固定キーワードを添えます。これが無いと、プローブは実 API に対して**必ず失敗します**。実際、キーワードを付ける前の版は実 API で `400` になり、この乖離はそこで発見されました。キーワードを付けた版は実 token で `apiProbe: ok` になることを確認済みです。
+- `rhcase_search` **rejects a call with no criteria before sending** and says what to add. Returning the API's `400` as-is would not tell you which argument was missing.
+- The `--check-auth` probe attaches a fixed keyword. Without it, the probe **always fails** against the real API. The version before the keyword was added did return `400` against the real API, which is how the divergence was found. The version with the keyword has been confirmed to return `apiProbe: ok` with a real token.
 
-どのフィールドが「条件」として数えられるかは仕様書にも API の応答にも書かれておらず、確認できているのは `keyword` が数えられることだけです。そのため本実装の判定は緩く、「ページング・ソート以外が 1 つでもあれば送る」としています。送った結果 API に拒否される可能性は残り、その場合は API のエラーがそのまま返ります。
+Which fields count as "criteria" is documented neither in the specification nor in the API's responses; all that is confirmed is that `keyword` counts. So this implementation's check is lenient: "send it if there is at least one thing that is not paging or sorting". The API may still reject what is sent, in which case its error is returned as-is.
 
-なお、この乖離はスタブに対するテストでは発見できませんでした。発見後、スタブ側にも同じ拒否を実装してあるので、プローブから条件を外すと該当テストが落ちます。
+Note that this divergence could not be found by the stub-based tests. After finding it, the same rejection was implemented in the stub, so removing the criteria from the probe now fails that test.
 
-### 7. コンテナは Podman・OpenShift・公開イメージで検証済み
+### 7. Containers verified on Podman, OpenShift and the published image
 
-2026-10-26 に Podman 5.7.1 で build と実行を、同日 OpenShift 実クラスタで overlay の適用を確認しました。v0.5.0 の GitHub Actions では Docker Buildx で linux/amd64・linux/arm64 を公開し、両方を `docker run --version` で起動確認しました。ローカルでも認証なしで arm64 イメージを pull し、`rh-sc-mcp 0.5.0` が返ることを確認しています。公開イメージの OpenShift 配置と HTTP 通信も、下記の範囲で確認しました。
+On 2026-10-26, a build and run were confirmed with Podman 5.7.1, and on the same day an overlay was applied to a real OpenShift cluster. The v0.5.0 GitHub Actions run published linux/amd64 and linux/arm64 with Docker Buildx, and both were started with `docker run --version`. Locally, the arm64 image was pulled without authentication and confirmed to report `rh-sc-mcp 0.5.0`. The published image was also deployed to OpenShift and exercised over HTTP, within the scope below.
 
-**マニフェスト相当の構成で動きます。** `deploy/base/deployment.yaml` と同じ条件 — read-only root filesystem、全 capability drop、`runAsUser` を固定せず任意に選んだ UID を与える、ConfigMap 相当を `/etc/rh-sc-mcp/config.yaml` にマウントし `--config` で渡す — で次を確認しました。
+**It works in a configuration equivalent to the manifests.** Under the same conditions as `deploy/base/deployment.yaml` — read-only root filesystem, all capabilities dropped, no pinned `runAsUser` but an arbitrarily chosen UID, the ConfigMap equivalent mounted at `/etc/rh-sc-mcp/config.yaml` and passed with `--config` — the following was confirmed.
 
-| 確認項目 | 結果 |
+| Check | Result |
 |---|---|
-| `podman build` | 成功。distroless ベース (`/bin/sh` 不在)、`USER 65532:65532`、約 11.8 MB |
-| 任意に選んだ UID (`--user 1000650000`) + `--read-only` + `--cap-drop=ALL` | 起動する |
-| `--print-scope` | 正常に出力 |
-| `/healthz` / `/readyz` | どちらも `200` |
-| `/mcp` (token なし / あり) | `401` / JSON-RPC の result |
-| コンテナ内の stdio `initialize` | JSON-RPC の result |
-| 起動ログ | HTTP 有効化の警告が出る。token の出力なし |
-| `SIGTERM` での停止 | `shutting down` を記録して終了コード `0`。`podman stop` も同じで、既定の 10 秒待ちを使い切らない |
+| `podman build` | Succeeded. Distroless base (no `/bin/sh`), `USER 65532:65532`, about 11.8 MB |
+| An arbitrary UID (`--user 1000650000`) + `--read-only` + `--cap-drop=ALL` | Starts |
+| `--print-scope` | Prints normally |
+| `/healthz` / `/readyz` | Both `200` |
+| `/mcp` (without / with token) | `401` / a JSON-RPC result |
+| stdio `initialize` inside the container | A JSON-RPC result |
+| Startup logs | The HTTP-enabled warning appears. No token in the output |
+| Shutdown on `SIGTERM` | Logs `shutting down` and exits with code `0`. `podman stop` behaves the same and does not use up the default 10-second wait |
 
-この UID は任意に選んだ 1 値です。クラスタが実際に割り当てた UID での確認は後述します。
+That UID is one arbitrarily chosen value. Verification with a UID actually assigned by a cluster follows below.
 
-**今回のアイドル状態での停止は SIGTERM で完結しました。** `podman kill --signal TERM` を送ると、プロセスは `shutting down` を記録して終了コード `0` で終わります。`podman stop` でも終了コードは `0` で、コマンドが戻るまで 0.373 秒 — 既定の 10 秒待ちを使い切らず、SIGKILL への昇格には至っていません。
+**This idle-state shutdown completed on SIGTERM alone.** Sending `podman kill --signal TERM` makes the process log `shutting down` and exit with code `0`. `podman stop` also exits `0`, and the command returned in 0.373 seconds — well inside the default 10-second wait, never escalating to SIGKILL.
 
-ただし**計測時に処理中のリクエストはありませんでした**。HTTP サーバーは SIGTERM を受けたあと処理中の HTTP リクエストの終了を最大 20 秒待つ設計ですが、その待ち時間そのものを負荷をかけた状態で測ってはいません。上の数値は「捌くものが何も無いときの停止」です。
+That said, **there were no in-flight requests at measurement time**. The HTTP server is designed to wait up to 20 seconds for in-flight HTTP requests after SIGTERM, but that wait itself was not measured under load. The numbers above describe a shutdown with nothing to drain.
 
-**OpenShift 実クラスタでも動きました。** 単一の amd64 ノード (Ready) を持つクラスタに専用 namespace を切り、`deploy/overlays/openshift` を適用しました。マニフェストから変えたのは `image` をクラスタ内部レジストリの検証ビルド (linux/amd64) に差し替えた 1 点だけです。資格情報は dummy の offline token とランダム生成の共有 HTTP token で、**実 Red Hat API は一度も呼んでいません** (当然、書き込みもしていません)。
+**It also worked on a real OpenShift cluster.** A dedicated namespace was created on a cluster with a single amd64 node (Ready) and `deploy/overlays/openshift` was applied. The only change from the manifests was swapping `image` for a verification build (linux/amd64) in the cluster-internal registry. Credentials were a dummy offline token and a randomly generated shared HTTP token; **the real Red Hat API was never called** (and naturally nothing was written).
 
-| 確認項目 | 結果 |
+| Check | Result |
 |---|---|
-| Pod | `replicas: 2` の両方が Ready |
+| Pods | Both of `replicas: 2` Ready |
 | SCC | `restricted-v2` |
-| 割り当て UID | `1000980000` — クラスタが選んだ値で、こちらからは指定していない |
+| Assigned UID | `1000980000` — chosen by the cluster, not specified from our side |
 | `readOnlyRootFilesystem` | `true` |
-| `/healthz` / `/readyz` (port-forward) | どちらも `200` |
-| `POST /mcp` token なし (port-forward) | `401` |
-| `initialize` token あり (port-forward) | `200`、`serverInfo.name` は `rh-sc-mcp` |
-| `tools/list` token あり (port-forward) | `200`。read-only の 5 ツール (`rhcase_scope` / `rhcase_search` / `rhcase_get` / `rhcase_list_comments` / `rhcase_get_comment`) |
-| `Route` 経由 (token なし / あり) | `401` / `initialize` が `200` |
+| `/healthz` / `/readyz` (port-forward) | Both `200` |
+| `POST /mcp` without token (port-forward) | `401` |
+| `initialize` with token (port-forward) | `200`, `serverInfo.name` is `rh-sc-mcp` |
+| `tools/list` with token (port-forward) | `200`. The 5 read-only tools (`rhcase_scope` / `rhcase_search` / `rhcase_get` / `rhcase_list_comments` / `rhcase_get_comment`) |
+| Through the `Route` (without / with token) | `401` / `initialize` returns `200` |
 
-[コンテナと Kubernetes / OpenShift](deployment.md#コンテナと-kubernetes--openshift) に書いた「割り当てられた UID に依存しない」という設計は、**Podman の 1000650000 とクラスタが割り当てた 1000980000 の 2 値で、意図どおり動くことを確認**しました。2 サンプルなので「どの UID でも動く」ことの証明にはなりません — `restricted-v2` が割り当てうるレンジは namespace ごとに異なり、そのごく一部を踏んだだけです。根拠は依然として「特定 UID とファイル所有権に依存しない作りにしてある」という設計のほうで、実測はそれと矛盾しなかった、という位置づけです。
+The "independent of the assigned UID" design described in [Containers and Kubernetes / OpenShift](deployment.md#containers-and-kubernetes--openshift) was **confirmed to behave as intended at two values: 1000650000 under Podman and 1000980000 as assigned by the cluster**. Two samples do not prove it works at any UID — the range `restricted-v2` can assign differs per namespace, and only a tiny part of one was touched. The basis is still the design, which avoids depending on a specific UID or on file ownership; the measurements merely failed to contradict it.
 
-**`Route` の TLS は確認していません。** Route のクラスタ証明書をローカルの信頼ストアで検証できず、`curl -k` で確認しました。上の `Route` 行が示すのは「Route を通して HTTP のやりとりが成立する」ところまでで、**利用者から見た TLS の信頼性は保証していません**。公開する際は証明書の経路をご自身で確認してください。
+**The `Route`'s TLS was not verified.** The Route's cluster certificate could not be validated against a local trust store, so `curl -k` was used. The `Route` row above shows only that HTTP exchanges work through the Route; **TLS trustworthiness from a user's point of view is not guaranteed**. Check the certificate path yourself before exposing this publicly.
 
-**ノードのアーキテクチャを明示してください。** 最初に arm64 のイメージを amd64 ノードへ載せてしまい、Pod が `Exec format error` で起動しませんでした。`Dockerfile` は `TARGETOS` / `TARGETARCH` を見てクロスコンパイルしますが、これらが渡らないとビルドホストのアーキテクチャのまま出てきます。arm64 のマシンから amd64 ノード向けに作り直したときは、次のように明示して通りました。
+**State the node architecture explicitly.** The first attempt put an arm64 image on an amd64 node, and the Pod failed to start with `Exec format error`. The `Dockerfile` cross-compiles based on `TARGETOS` / `TARGETARCH`, but without those it produces the build host's architecture. Rebuilding from an arm64 machine for an amd64 node worked with these flags:
 
 ```bash
 podman build --platform linux/amd64 \
@@ -187,24 +189,24 @@ podman build --platform linux/amd64 \
   -t <registry>/<namespace>/rh-sc-mcp:<tag> .
 ```
 
-`--platform` が最終イメージのアーキテクチャを決め、`TARGETOS` / `TARGETARCH` がビルドステージの `go build` に渡ります。**`--platform` を省くと最終イメージが arm64 のまま出ることがあり、`Exec format error` が再発します**。`BUILDPLATFORM` はビルドするマシン側の値です。ビルド後は次で確かめてください — 実際に `linux/amd64` が返ることを確認しています。
+`--platform` decides the final image's architecture, and `TARGETOS` / `TARGETARCH` are passed to `go build` in the build stage. **Omitting `--platform` can leave the final image as arm64, reproducing `Exec format error`.** `BUILDPLATFORM` is the value for the machine doing the build. Check the result afterwards with the following — it was confirmed to return `linux/amd64`:
 
 ```bash
 podman image inspect <image> --format '{{.Os}}/{{.Architecture}}'
 ```
 
-**実クラスタでの停止と drain は未検証です。** 上の SIGTERM の計測は Podman 単体のもので、Pod の削除や rolling update で同じように振る舞うかは確認していません。
+**Shutdown and drain on a real cluster are unverified.** The SIGTERM measurements above were Podman-only; whether Pod deletion or a rolling update behaves the same has not been checked.
 
-**制約が 1 つあります。** イメージの `CMD` は `--config /etc/rh-sc-mcp/config.yaml` を指しています。これを置き換えて `--config` を省くと、既定の設定ファイル生成が `$HOME` に書き込もうとして失敗します — read-only root filesystem では `mkdir ... read-only file system`、割り当て UID では `$HOME` が別ユーザーの所有なので `permission denied` です。素のイメージを `CMD` 抜きで使う場合は、`--config` を渡すか `HOME` を書き込み可能な場所に向けてください。マニフェストどおりに使う限りは該当しません。
+**There is one constraint.** The image's `CMD` points at `--config /etc/rh-sc-mcp/config.yaml`. Replace it and omit `--config`, and generating the default configuration file will try to write into `$HOME` and fail — `mkdir ... read-only file system` on a read-only root filesystem, and `permission denied` under an assigned UID because `$HOME` belongs to a different user. If you use the bare image without its `CMD`, either pass `--config` or point `HOME` somewhere writable. Using it as the manifests do avoids this entirely.
 
-上の Podman / OpenShift の HTTP と stdio の実測は、ローカルで作成したイメージに対するものです。
+The Podman and OpenShift HTTP and stdio measurements above were made against a locally built image.
 
-**公開イメージ v0.5.0 を使った追加検証:** 専用 namespace に `ghcr.io/konono/rh-sc-mcp:v0.5.0` を指定して base マニフェストを適用し、2 Pod が Ready になりました。1 回目は本番 offline token を Secret から渡し、Pod 内の `--check-auth` が `tokenExchange: ok` / `apiProbe: ok` を返しました。このプローブは読み取り専用の filter を 1 回送るだけで、ケースを取得できることまでは保証しません。ケースの作成・更新・コメント投稿は実行していません。
+**Additional verification with the published v0.5.0 image:** the base manifests were applied in a dedicated namespace with `ghcr.io/konono/rh-sc-mcp:v0.5.0`, and 2 Pods reached Ready. In the first run a production offline token was supplied from a Secret, and `--check-auth` inside a Pod returned `tokenExchange: ok` / `apiProbe: ok`. That probe only sends one read-only filter request and does not establish that cases can be retrieved. No case was created, updated or commented on.
 
-2 回目は dummy offline token とランダムな共有 HTTP token に替え、Route を作らず Service への port-forward で `/healthz`・`/readyz` が `200`、未認証の `/mcp` が `401`、認証付き `initialize` が `200` で JSON-RPC result を返すことを確認しました。両方の検証 namespace と Secret は終了後に削除済みです。**公開イメージでの Route 経由の接続、実ケースの取得、実クラスタでの停止・drain は未確認**です。
+The second run swapped in a dummy offline token and a random shared HTTP token, created no Route, and used port-forwarding to the Service to confirm `200` on `/healthz` and `/readyz`, `401` on unauthenticated `/mcp`, and `200` with a JSON-RPC result for an authenticated `initialize`. Both verification namespaces and their Secrets were deleted afterwards. **Connecting through a Route with the published image, retrieving a real case, and shutdown/drain on a real cluster remain unverified.**
 
-### 8. severity / status / product の値は検証しない
+### 8. severity / status / product values are not validated
 
-仕様書がこれらの列挙値を定義していないため、`"4 (Low)"` のような値をサーバー側で検証することはしていません。誤った値は上流のエラーとして返ります。一方、仕様書が値を明示している項目 (`contentType`、`createdByType`、コメントの `sortField` / `sortOrder`、ケース検索の `sortOrder`) は検証・正規化します。
+The specification defines no enumerations for these, so values such as `"4 (Low)"` are not validated server-side. A wrong value comes back as an upstream error. Where the specification does state the values (`contentType`, `createdByType`, comment `sortField` / `sortOrder`, case search `sortOrder`), they are validated and normalised.
 
 ---
