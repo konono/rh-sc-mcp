@@ -10,6 +10,12 @@ dist/
 # Local panecom pane/session state, not part of the project.
 .panecom/
 
+# OS packages installed at startup by the aw container launcher. Root
+# anchored because aw reads it from the workspace root. Untracked: it
+# describes one author's container, not the project. What a contributor
+# needs is the toolchain note in mise.toml.
+/packages.txt
+
 # Per-session work journals written by the tracecraft skill. They record
 # one author's investigation, not the project's state, and may quote
 # command output from a local environment.

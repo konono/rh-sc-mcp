@@ -1,0 +1,24 @@
+# Development toolchain for rh-sc-mcp.
+#
+#   mise install
+#
+# Two things are not mise tools. Install them with your system package
+# manager (Debian/Ubuntu: apt-get install make gcc):
+#   make  — the mise registry only offers it via conda / an asdf plugin that
+#           builds from source
+#   gcc   — `make test` runs `go test -race`, and -race needs cgo, which needs
+#           a C compiler. Without one the run fails with
+#           "-race requires cgo; enable cgo by setting CGO_ENABLED=1", and
+#           setting CGO_ENABLED=1 alone does not help.
+
+[tools]
+# go.mod requires 1.25.0, and CI runs the test matrix on 1.25 and 1.26.
+# Pinned to the lower bound so that a local run fails on anything that would
+# fail CI's 1.25 job.
+go = "1.25"
+
+# Used by `make lint`. Matched to the version pinned in
+# .github/workflows/ci.yml, so local lint results agree with CI.
+# Keep at 2.12.0 or later: earlier versions fetch the config JSONSchema from
+# golangci-lint.run on every run.
+golangci-lint = "2.12.2"
