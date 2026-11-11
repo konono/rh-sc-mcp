@@ -156,22 +156,31 @@ const (
 	// ResKCS covers the knowledge-base search endpoint, which is a
 	// different API surface (Solr) than case management.
 	ResKCS Resource = "kcs"
+	// ResLifecycle covers the Product Life Cycle API, a public and
+	// unauthenticated surface outside case management.
+	ResLifecycle Resource = "lifecycle"
 )
 
 // AllResources is the set of scopable resources, in the order rhcase_scope
 // reports them.
-var AllResources = []Resource{ResCase, ResComment, ResKCS}
+var AllResources = []Resource{ResCase, ResComment, ResKCS, ResLifecycle}
+
+// namedOnly are the resources that defaultPermission never turns on: each
+// reaches outside case management, so an operator has to name it.
+var namedOnly = map[Resource]bool{ResKCS: true, ResLifecycle: true}
 
 // defaultLevels are the levels used when a resource has no explicit rule
 // and no defaultPermission is configured.
 //
-// KCS is none rather than read because it reaches outside case management:
-// an operator who configured this server to read their support cases has
-// not thereby asked for a knowledge-base search tool. It must be named.
+// KCS and lifecycle are none rather than read because they reach outside
+// case management: an operator who configured this server to read their
+// support cases has not thereby asked for a knowledge-base search or a
+// product life cycle tool. They must be named.
 var defaultLevels = map[Resource]Level{
-	ResCase:    LevelRead,
-	ResComment: LevelRead,
-	ResKCS:     LevelNone,
+	ResCase:      LevelRead,
+	ResComment:   LevelRead,
+	ResKCS:       LevelNone,
+	ResLifecycle: LevelNone,
 }
 
 // ResourceRule is the per-resource scope.
@@ -258,7 +267,7 @@ type Config struct {
 
 	// DefaultPermission applies to resources with no explicit rule. When it
 	// is absent, each resource falls back to its own default: read for
-	// cases and comments, none for KCS.
+	// cases and comments, none for KCS and lifecycle.
 	DefaultPermission *Level `yaml:"defaultPermission"`
 
 	Resources map[Resource]ResourceRule `yaml:"resources"`
@@ -504,9 +513,10 @@ func (c *Config) LevelFor(r Resource) Level {
 	if c.DefaultPermission != nil {
 		l = *c.DefaultPermission
 		// defaultPermission is a convenience for the resources an operator
-		// is already using; it does not quietly switch on the KCS surface,
-		// which has to be named. See defaultLevels.
-		if r == ResKCS {
+		// is already using; it does not quietly switch on the surfaces
+		// outside case management, which have to be named. See
+		// defaultLevels.
+		if namedOnly[r] {
 			l = LevelNone
 		}
 	}

@@ -19,6 +19,7 @@ Only the tools whose permission level is satisfied get registered.
 | `rhcase_get_comment` | `comment: read` | `GET /v3/cases/{caseNumber}/comments/{commentId}` | One comment |
 | `rhcase_add_comment` | `comment: write` | `POST /v3/cases/{caseNumber}/comments` | Post a comment. `contentType` is `plaintext` (default) or `html`; `createdByType` is `Customer`, `Associate` or `Internal` |
 | `rhkcs_search` | `kcs: read` | `POST /search/v2/kcs` | Knowledge base search. Projected down to title, kind, `viewUri` and a short snippet (optional, off by default) |
+| `rhlifecycle_get` | `lifecycle: read` | `GET https://access.redhat.com/product-life-cycles/api/v1/products` | Support phases and dates for each version of a product, with the current phase computed from the dates. Public API, no credential sent (optional, off by default) |
 
 ### How the inputs and outputs are designed
 
@@ -77,5 +78,43 @@ Rather than passing the search backend's response through, it is **projected**. 
 - `viewUri` is the API's `view_uri` passed through **verbatim**. Whether it opens is not something this server checks.
 - `numFoundExact` is the backend's own claim. When it is `false`, `numFound` is approximate and `notes` says so.
 - If the response is not in the known Solr shape, `documents` comes back empty and `unrecognizedShape` is returned instead. That contains only `topLevelKeys` / `sizeBytes` / a description — **never any of the content**.
+
+### What `rhlifecycle_get` returns
+
+`product` must be the **exact** product name, as Red Hat writes it (`Red Hat Ansible Automation Platform`). The API does not do partial matches — `Ansible` returns nothing — and the result says so. `version` is optional; the API ignores a version parameter, so this server filters by it after the response arrives, and lists the available versions when none matches.
+
+```json
+{
+  "asOf": "2026-11-11",
+  "regeneratedAt": "2026-11-11T06:30:07.993Z",
+  "products": [
+    {
+      "name": "Red Hat Ansible Automation Platform",
+      "link": "https://access.redhat.com/support/policy/updates/ansible-automation-platform",
+      "isRetired": false,
+      "versions": [
+        {
+          "name": "2.6",
+          "reportedType": "Full Support",
+          "phases": [
+            { "name": "General availability", "startText": "N/A", "end": "2025-10-01" },
+            { "name": "Full support", "start": "2025-10-01", "end": "2026-10-01" },
+            { "name": "Maintenance Support 1", "start": "2026-10-02", "end": "2027-10-01" },
+            { "name": "Extended update support", "startText": "N/A", "endText": "N/A" }
+          ],
+          "currentPhase": "Maintenance Support 1"
+        }
+      ]
+    }
+  ],
+  "notes": ["..."]
+}
+```
+
+- Dates are UTC calendar dates. An end date is the **last day** of its phase (the API writes "ends 2026-10-01, next starts 2026-10-02").
+- Where the API gives text instead of a date (`*_format: string`, observed as `N/A`), the value is in `startText` / `endText` and is never read as a date.
+- **`currentPhase` is computed from the dates** as of `asOf`, using only phases with both a start and an end date. When no such phase contains that day, `currentPhase` is omitted and `currentPhaseNote` says why (all phases ended, not started yet, or between phases).
+- `reportedType` is the API's own label for the version. It can lag the dates — in the example, 2.6 is labelled `Full Support` while its dates put it in Maintenance 1 — which is why it is reported separately rather than used as the current phase.
+- The API has no published specification. A response in an unexpected shape comes back as `unrecognizedShape`, with no part of the body.
 
 ---

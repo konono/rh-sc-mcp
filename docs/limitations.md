@@ -210,3 +210,16 @@ The second run swapped in a dummy offline token and a random shared HTTP token, 
 The specification defines no enumerations for these, so values such as `"4 (Low)"` are not validated server-side. A wrong value comes back as an upstream error. Where the specification does state the values (`contentType`, `createdByType`, comment `sortField` / `sortOrder`, case search `sortOrder`), they are validated and normalised.
 
 ---
+
+### 9. The Product Life Cycle API has no published specification
+
+`rhlifecycle_get` reads `https://access.redhat.com/product-life-cycles/api/v1/products`. Its root and `openapi.json` answered `401` and no public specification was found, so **the following is what was measured** (2026-11-11), not a contract.
+
+- `name` matches the full product name exactly. `Ansible` returned an empty `data` array (HTTP `200`).
+- A `version` parameter is ignored, so this server does not send one and filters after the response arrives.
+- Each phase boundary carries a `*_format` of `date` or `string`. Every `string` value observed was `N/A`; such values are passed through as text, never parsed as dates.
+- A version's `type` can lag behind its dates (AAP 2.6 was `Full Support` on 2026-11-10 although its dates put it in Maintenance 1). `currentPhase` is therefore computed from the dates, and `type` is reported separately as `reportedType`.
+
+If the response shape changes, the tool returns `unrecognizedShape` with no part of the body rather than guessing.
+
+---

@@ -208,3 +208,16 @@ podman image inspect <image> --format '{{.Os}}/{{.Architecture}}'
 仕様書がこれらの列挙値を定義していないため、`"4 (Low)"` のような値をサーバー側で検証することはしていません。誤った値は上流のエラーとして返ります。一方、仕様書が値を明示している項目 (`contentType`、`createdByType`、コメントの `sortField` / `sortOrder`、ケース検索の `sortOrder`) は検証・正規化します。
 
 ---
+
+### 9. Product Life Cycle API には公開された仕様書がない
+
+`rhlifecycle_get` は `https://access.redhat.com/product-life-cycles/api/v1/products` を読みます。API のルートと `openapi.json` は `401` を返し、公開された仕様書は見つかりませんでした。**以下は実測した内容** (2026-11-11) で、保証された仕様ではありません。
+
+- `name` は製品名の完全一致です。`Ansible` では空の `data` 配列が返りました (HTTP `200`)。
+- `version` パラメーターは無視されるため、本サーバーは送らずに、応答を受け取ってから絞り込みます。
+- フェーズの開始日・終了日には `*_format` (`date` か `string`) が付きます。実測した `string` の値はすべて `N/A` でした。こうした値は文字列のまま返し、日付としては解釈しません。
+- バージョンの `type` は日付より更新が遅れることがあります (2026-11-10 時点で AAP 2.6 は `Full Support` でしたが、日付上は Maintenance 1 でした)。そのため `currentPhase` は日付から計算し、`type` は `reportedType` として別に返します。
+
+応答の形が変わった場合は推測せず、本文を含めない `unrecognizedShape` を返します。
+
+---

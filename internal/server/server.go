@@ -32,6 +32,12 @@ type Server struct {
 	api *redhat.Client
 	mcp *mcp.Server
 
+	// lifecycle reads the public Product Life Cycle API. It is a separate
+	// client from api so that no credential can ride along to it.
+	lifecycle *redhat.LifecycleClient
+	// now is the clock currentPhase is computed against; tests fix it.
+	now func() time.Time
+
 	registered []string
 }
 
@@ -51,7 +57,12 @@ func New(cfg *config.Config) *Server {
 // newWithClient is the seam the tests use to point the server at an
 // httptest server without going through the SSO exchange twice.
 func newWithClient(cfg *config.Config, api *redhat.Client) *Server {
-	s := &Server{cfg: cfg, api: api}
+	s := &Server{
+		cfg:       cfg,
+		api:       api,
+		lifecycle: redhat.NewLifecycleClient(redhat.DefaultLifecycleURL, time.Duration(cfg.TimeoutSeconds)*time.Second),
+		now:       time.Now,
+	}
 	s.mcp = mcp.NewServer(&mcp.Implementation{
 		Name:    "rh-sc-mcp",
 		Title:   "Red Hat Support Cases",
@@ -217,6 +228,9 @@ func (s *Server) instructions() string {
 	}
 	fmt.Fprintf(&b, "Case numbers are digit strings with significant leading zeros (e.g. 04337263); pass them as strings.\n")
 	fmt.Fprintf(&b, "Searches return at most %d cases per call; use offset to page.\n", s.cfg.MaxResults)
+	if s.cfg.Allows(config.ResLifecycle, config.LevelRead) {
+		b.WriteString("rhlifecycle_get needs the exact product name (e.g. \"Red Hat Ansible Automation Platform\"); partial names match nothing.\n")
+	}
 	return b.String()
 }
 

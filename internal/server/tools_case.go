@@ -13,6 +13,7 @@ func (s *Server) registerAll() {
 	s.registerCase()
 	s.registerComment()
 	s.registerKCS()
+	s.registerLifecycle()
 }
 
 // ---- rhcase_scope ---------------------------------------------------------
