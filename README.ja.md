@@ -61,8 +61,9 @@ resources:
 | コメントの一覧・詳細表示 | `rhcase_list_comments`, `rhcase_get_comment` | 有効 |
 | ケースの作成・更新、コメント投稿 | `rhcase_create`, `rhcase_update`, `rhcase_add_comment` | 無効 |
 | KCS ナレッジ検索 | `rhkcs_search` | 無効 |
+| 製品ライフサイクルの日付 | `rhlifecycle_get` | 無効 |
 
-`rhcase_scope` は常に使えます。KCS を使うには、設定ファイルに `resources.kcs.permission: read` を指定します。書き込みには `readOnly: false` と対象リソースの `permission: write` の両方が必要です。現在の権限は `rh-sc-mcp --print-scope` で確認できます。[全ツールと入出力](docs/ja/tools.md) / [権限の詳細](docs/ja/configuration.md#権限モデル)
+`rhcase_scope` は常に使えます。KCS を使うには、設定ファイルに `resources.kcs.permission: read` を指定します。ライフサイクルの日付は `resources.lifecycle.permission: read` で有効になります。書き込みには `readOnly: false` と対象リソースの `permission: write` の両方が必要です。現在の権限は `rh-sc-mcp --print-scope` で確認できます。[全ツールと入出力](docs/ja/tools.md) / [権限の詳細](docs/ja/configuration.md#権限モデル)
 
 ## HTTP・コンテナで使う
 

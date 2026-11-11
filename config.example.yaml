@@ -63,7 +63,7 @@
 readOnly: true
 
 # Default for resources not named under "resources".
-# When omitted, the per-resource defaults apply (case/comment = read, kcs = none).
+# When omitted, the per-resource defaults apply (case/comment = read, kcs/lifecycle = none).
 # defaultPermission: read
 
 resources:
@@ -79,6 +79,11 @@ resources:
   # so it is never enabled unless written explicitly (even defaultPermission:
   # write leaves it at none).
   # kcs:
+  #   permission: read
+  # Product Life Cycle API (support phases and dates per product version).
+  # Public and unauthenticated: no Red Hat credential is sent to it. Like kcs,
+  # it is never enabled unless written explicitly.
+  # lifecycle:
   #   permission: read
 
 # ---------------------------------------------------------------------------

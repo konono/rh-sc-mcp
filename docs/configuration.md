@@ -35,7 +35,7 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 | `ssoClientID` | `rhsm-api` | client_id for the token exchange |
 | `readOnly` | `true` | Global kill switch. While true, everything is reduced to read |
 | `defaultPermission` | (per-resource default) | Default level for resources not named in `resources` |
-| `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`=`none` | Per-resource `none` / `read` / `write` |
+| `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`/`lifecycle`=`none` | Per-resource `none` / `read` / `write` |
 | `caseViewURL` | (none) | Prefix for human-facing links. When unset, `caseUrl` is not emitted |
 | `maxResults` | `50` | Maximum cases per search (the API's own cap is 200) |
 | `http.addr` | (none) | HTTP listen address. Empty means HTTP is disabled (off by default) |
@@ -62,18 +62,20 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 
 ### Permission model
 
-There are three resources and three levels, ordered `none` < `read` < `write`.
+There are four resources and three levels, ordered `none` < `read` < `write`.
 
 | Resource | Default | Tools it covers |
 |---|---|---|
 | `case` | `read` | `rhcase_search` / `rhcase_get` (read), `rhcase_create` / `rhcase_update` (write) |
 | `comment` | `read` | `rhcase_list_comments` / `rhcase_get_comment` (read), `rhcase_add_comment` (write) |
 | `kcs` | `none` | `rhkcs_search` (read) |
+| `lifecycle` | `none` | `rhlifecycle_get` (read) |
 
-Three things are worth knowing.
+Four things are worth knowing.
 
 - **`case` and `comment` are independent.** Writing `comment: write` + `case: read` gives you "let the agent reply, but don't let it change status or severity".
 - **`kcs` is never enabled unless you say so explicitly.** Even `defaultPermission: write` leaves it at `none`. It is a different API surface from case management, so "I want to read cases" must not implicitly turn on knowledge base search.
+- **`lifecycle` is likewise never enabled unless you say so explicitly**, for the same reason. It reads the public Product Life Cycle API, and **no Red Hat credential is sent to it** — it uses a separate HTTP client with no token at all.
 - **While `readOnly: true`, any granted write is ignored.** That way you can tighten things temporarily without going around deleting individual permission lines.
 
 ### Checking the configuration
@@ -91,7 +93,7 @@ rh-sc-mcp --print-scope
   "maxComments": 50,
   "maxResults": 50,
   "readOnly": true,
-  "resources": { "case": "read", "comment": "read", "kcs": "none" },
+  "resources": { "case": "read", "comment": "read", "kcs": "none", "lifecycle": "none" },
   "ssoClientID": "rhsm-api",
   "ssoTokenURL": "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token",
   "timeoutSec": 60,

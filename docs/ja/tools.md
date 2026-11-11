@@ -17,6 +17,7 @@
 | `rhcase_get_comment` | `comment: read` | `GET /v3/cases/{caseNumber}/comments/{commentId}` | コメント 1 件 |
 | `rhcase_add_comment` | `comment: write` | `POST /v3/cases/{caseNumber}/comments` | コメント投稿。`contentType` は `plaintext` (既定) / `html`、`createdByType` は `Customer` / `Associate` / `Internal` |
 | `rhkcs_search` | `kcs: read` | `POST /search/v2/kcs` | ナレッジベース検索。タイトル・種別・`viewUri`・短い抜粋に射影して返す (任意機能、既定 OFF) |
+| `rhlifecycle_get` | `lifecycle: read` | `GET https://access.redhat.com/product-life-cycles/api/v1/products` | 製品のバージョンごとのサポートフェーズと日付。現在のフェーズを日付から計算して返す。公開 API で、認証情報は送らない (任意機能、既定 OFF) |
 
 ### 入出力の設計
 
@@ -75,5 +76,43 @@
 - `viewUri` は API の `view_uri` を**そのまま**通した値です。開けるかどうかは本サーバーでは確認していません。
 - `numFoundExact` はバックエンドの申告です。`false` の場合、`numFound` は概数なので `notes` でもその旨を伝えます。
 - 応答が既知の Solr 形でなかった場合は `documents` が空になり、代わりに `unrecognizedShape` が入ります。中身は `topLevelKeys` / `sizeBytes` / 説明だけで、**本文は一切含めません**。
+
+### `rhlifecycle_get` の戻り値
+
+`product` には、Red Hat の表記どおりの**完全な**製品名 (`Red Hat Ansible Automation Platform`) を渡します。API は部分一致をしないため、`Ansible` では何も返らず、結果の `notes` でその旨を伝えます。`version` は任意です。API は version パラメーターを無視するので、本サーバーが応答を受け取ってから絞り込みます。一致するバージョンがない場合は、利用できるバージョンの一覧を返します。
+
+```json
+{
+  "asOf": "2026-11-11",
+  "regeneratedAt": "2026-11-11T06:30:07.993Z",
+  "products": [
+    {
+      "name": "Red Hat Ansible Automation Platform",
+      "link": "https://access.redhat.com/support/policy/updates/ansible-automation-platform",
+      "isRetired": false,
+      "versions": [
+        {
+          "name": "2.6",
+          "reportedType": "Full Support",
+          "phases": [
+            { "name": "General availability", "startText": "N/A", "end": "2025-10-01" },
+            { "name": "Full support", "start": "2025-10-01", "end": "2026-10-01" },
+            { "name": "Maintenance Support 1", "start": "2026-10-02", "end": "2027-10-01" },
+            { "name": "Extended update support", "startText": "N/A", "endText": "N/A" }
+          ],
+          "currentPhase": "Maintenance Support 1"
+        }
+      ]
+    }
+  ],
+  "notes": ["..."]
+}
+```
+
+- 日付は UTC の暦日です。終了日はそのフェーズの**最終日**です (API は「2026-10-01 に終了、次は 2026-10-02 に開始」という形で書いています)。
+- API が日付の代わりに文字列を返す場合 (`*_format: string`。実測では `N/A`) は、値を `startText` / `endText` に入れます。日付としては扱いません。
+- **`currentPhase` は日付から計算します。** `asOf` の日を、開始日と終了日の両方があるフェーズに当てはめます。当てはまるフェーズがない場合は `currentPhase` を省略し、`currentPhaseNote` に理由 (すべて終了した、まだ始まっていない、フェーズの間にある) を書きます。
+- `reportedType` は API 自身のラベルです。日付より更新が遅れることがあります (例では、2.6 は日付上 Maintenance 1 ですが、ラベルは `Full Support` です)。そのため現在のフェーズとしては使わず、別の項目で返します。
+- この API には公開された仕様書がありません。想定外の形の応答は `unrecognizedShape` として返し、本文は含めません。
 
 ---

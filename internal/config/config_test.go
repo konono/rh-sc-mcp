@@ -153,6 +153,26 @@ func TestKCSStaysOffUnlessNamed(t *testing.T) {
 	}
 }
 
+// The life cycle API is likewise outside case management.
+func TestLifecycleStaysOffUnlessNamed(t *testing.T) {
+	withToken(t)
+	c, err := Load(write(t, "readOnly: false\ndefaultPermission: write\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LevelFor(ResLifecycle) != LevelNone {
+		t.Fatalf("defaultPermission switched on lifecycle: %s", c.LevelFor(ResLifecycle))
+	}
+
+	c2, err := Load(write(t, "resources:\n  lifecycle:\n    permission: read\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.LevelFor(ResLifecycle) != LevelRead {
+		t.Fatalf("an explicit lifecycle rule was ignored: %s", c2.LevelFor(ResLifecycle))
+	}
+}
+
 // readOnly is the override of last resort: a resource granted write must
 // still come back capped while it is on.
 func TestReadOnlyCapsEveryResource(t *testing.T) {

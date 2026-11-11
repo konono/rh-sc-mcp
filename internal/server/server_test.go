@@ -330,6 +330,9 @@ func TestReadOnlyServerExposesNoWriteTools(t *testing.T) {
 	if names["rhkcs_search"] {
 		t.Error("the KCS tool is exposed without being granted")
 	}
+	if names["rhlifecycle_get"] {
+		t.Error("the lifecycle tool is exposed without being granted")
+	}
 }
 
 func TestWriteToolsAppearWhenGranted(t *testing.T) {

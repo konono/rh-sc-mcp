@@ -61,8 +61,9 @@ resources:
 | List comments, show one comment | `rhcase_list_comments`, `rhcase_get_comment` | Enabled |
 | Create and update cases, post comments | `rhcase_create`, `rhcase_update`, `rhcase_add_comment` | Disabled |
 | KCS knowledge base search | `rhkcs_search` | Disabled |
+| Product life cycle dates | `rhlifecycle_get` | Disabled |
 
-`rhcase_scope` is always available. To use KCS, set `resources.kcs.permission: read` in the configuration file. Writes require **both** `readOnly: false` and `permission: write` on the resource in question. Check what is currently granted with `rh-sc-mcp --print-scope`. [All tools and their I/O](docs/tools.md) / [Permission details](docs/configuration.md#permission-model)
+`rhcase_scope` is always available. To use KCS, set `resources.kcs.permission: read` in the configuration file; for life cycle dates, `resources.lifecycle.permission: read`. Writes require **both** `readOnly: false` and `permission: write` on the resource in question. Check what is currently granted with `rh-sc-mcp --print-scope`. [All tools and their I/O](docs/tools.md) / [Permission details](docs/configuration.md#permission-model)
 
 ## Using HTTP and containers
 

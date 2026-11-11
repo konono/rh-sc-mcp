@@ -33,7 +33,7 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 | `ssoClientID` | `rhsm-api` | トークン交換の client_id |
 | `readOnly` | `true` | 全体キルスイッチ。true の間はすべて read に丸められる |
 | `defaultPermission` | (リソース既定) | `resources` に明示がないリソースの既定レベル |
-| `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`=`none` | リソースごとの `none` / `read` / `write` |
+| `resources.<name>.permission` | `case`/`comment`=`read`, `kcs`/`lifecycle`=`none` | リソースごとの `none` / `read` / `write` |
 | `caseViewURL` | (なし) | 人間向けリンクの接頭辞。未設定なら `caseUrl` を出力しない |
 | `maxResults` | `50` | 検索 1 回あたりのケース数上限 (API 側上限は 200) |
 | `http.addr` | (なし) | HTTP の待受アドレス。空なら HTTP 無効 (既定 OFF) |
@@ -60,18 +60,20 @@ RH_SC_OFFLINE_TOKEN=... rh-sc-mcp --print-scope
 
 ### 権限モデル
 
-リソースは 3 つ、レベルは `none` < `read` < `write` の 3 段階です。
+リソースは 4 つ、レベルは `none` < `read` < `write` の 3 段階です。
 
 | リソース | 既定 | 対象ツール |
 |---|---|---|
 | `case` | `read` | `rhcase_search` / `rhcase_get` (read)、`rhcase_create` / `rhcase_update` (write) |
 | `comment` | `read` | `rhcase_list_comments` / `rhcase_get_comment` (read)、`rhcase_add_comment` (write) |
 | `kcs` | `none` | `rhkcs_search` (read) |
+| `lifecycle` | `none` | `rhlifecycle_get` (read) |
 
-ポイントが 3 つあります。
+ポイントが 4 つあります。
 
 - **`case` と `comment` は独立しています。** `comment: write` + `case: read` と書けば、「エージェントに返信はさせるが、ステータスや severity は変えさせない」構成になります。
 - **`kcs` は明示しない限り有効になりません。** `defaultPermission: write` にしても `none` のままです。ケース管理とは別の API 面なので、「ケースを読みたい」という設定が暗黙にナレッジベース検索を有効化しないようにしています。
+- **`lifecycle` も同じ理由で、明示しない限り有効になりません。** 公開の Product Life Cycle API を読むツールで、**Red Hat の認証情報は送りません** (token を持たない別の HTTP クライアントを使います)。
 - **`readOnly: true` の間は write 付与が無視されます。** 設定を一時的に絞るときに、個別の権限行を消して回る必要がありません。
 
 ### 設定の確認
@@ -89,7 +91,7 @@ rh-sc-mcp --print-scope
   "maxComments": 50,
   "maxResults": 50,
   "readOnly": true,
-  "resources": { "case": "read", "comment": "read", "kcs": "none" },
+  "resources": { "case": "read", "comment": "read", "kcs": "none", "lifecycle": "none" },
   "ssoClientID": "rhsm-api",
   "ssoTokenURL": "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token",
   "timeoutSec": 60,
