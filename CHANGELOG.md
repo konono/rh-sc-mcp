@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/konono/rh-sc-mcp/compare/v0.5.2...v0.6.0) (2026-11-12)
+
+
+### Features
+
+* add rhlifecycle_get tool for Red Hat product life cycle dates ([#18](https://github.com/konono/rh-sc-mcp/issues/18)) ([0cb5ea2](https://github.com/konono/rh-sc-mcp/commit/0cb5ea2d20385d1cd41d5eecd134d06128af6fd3))
+
 ## [0.5.2](https://github.com/konono/rh-sc-mcp/compare/v0.5.1...v0.5.2) (2026-10-26)
 
 
