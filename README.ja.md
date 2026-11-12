@@ -65,6 +65,18 @@ resources:
 
 `rhcase_scope` は常に使えます。KCS を使うには、設定ファイルに `resources.kcs.permission: read` を指定します。ライフサイクルの日付は `resources.lifecycle.permission: read` で有効になります。書き込みには `readOnly: false` と対象リソースの `permission: write` の両方が必要です。現在の権限は `rh-sc-mcp --print-scope` で確認できます。[全ツールと入出力](docs/ja/tools.md) / [権限の詳細](docs/ja/configuration.md#権限モデル)
 
+### Red Hat のドキュメントを読む
+
+このサーバーは docs.redhat.com のページを取得しません。ドキュメントを読むには、Red Hat 公式の [MCP server for Red Hat Documentation](https://docs.redhat.com/en/documentation/mcp_server_for_red_hat_documentation/current) を併用してください。Red Hat 製品のドキュメントを検索し、ページを Markdown で返します。
+
+```bash
+claude mcp add --scope user --transport streamable-http red-hat-docs https://docs-mcp.api.redhat.com/mcp
+```
+
+初めて使うときに、Red Hat Single Sign-On のログイン画面がブラウザで開きます (Claude Code では `/mcp` を実行し、`red-hat-docs` を選んで認証します)。VS Code、Cursor、Codex での設定方法は、上記リンク先の Red Hat のドキュメントにあります。公式サーバーは Red Hat が運営する別のサーバーで、ログインも別です。このサーバーに渡している offline token は使いません。
+
+2 つは組み合わせて使えます。`rhkcs_search` はドキュメントのページも検索結果に返し (`id` がページの URL です)、公式サーバーでそのページを読めます。
+
 ## HTTP・コンテナで使う
 
 HTTP ではサーバーを常駐させ、クライアントは `/mcp` に接続します。接続には **offline token とは別の共有 bearer token** が必要です。各クライアントの HTTP 登録例は [MCP クライアント一覧](docs/ja/clients.md)、起動と保護の設定は [HTTP サーバーの運用](docs/ja/http.md) を参照してください。
