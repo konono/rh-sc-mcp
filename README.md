@@ -65,6 +65,18 @@ resources:
 
 `rhcase_scope` is always available. To use KCS, set `resources.kcs.permission: read` in the configuration file; for life cycle dates, `resources.lifecycle.permission: read`. Writes require **both** `readOnly: false` and `permission: write` on the resource in question. Check what is currently granted with `rh-sc-mcp --print-scope`. [All tools and their I/O](docs/tools.md) / [Permission details](docs/configuration.md#permission-model)
 
+### Reading Red Hat documentation pages
+
+This server does not fetch docs.redhat.com pages. For that, use Red Hat's official [MCP server for Red Hat Documentation](https://docs.redhat.com/en/documentation/mcp_server_for_red_hat_documentation/current) alongside it. It searches Red Hat product documentation and returns pages as Markdown.
+
+```bash
+claude mcp add --scope user --transport streamable-http red-hat-docs https://docs-mcp.api.redhat.com/mcp
+```
+
+The first time you use it, a browser window opens for Red Hat Single Sign-On (in Claude Code, run `/mcp`, select `red-hat-docs` and authenticate). Setup for VS Code, Cursor and Codex is in Red Hat's documentation linked above. It is a separate server run by Red Hat, with its own login; it does not use the offline token you give this server.
+
+The two work together: `rhkcs_search` also returns documentation pages (their `id` is the page URL), and the official server can read them.
+
 ## Using HTTP and containers
 
 Over HTTP the server runs as a long-lived process and clients connect to `/mcp`. The connection requires a **shared bearer token, separate from the offline token**. Per-client HTTP registration examples are in [MCP clients](docs/clients.md); startup and hardening are covered in [Running the HTTP server](docs/http.md).
